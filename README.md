@@ -41,6 +41,23 @@ npm test
 
 公开分发时，使用同团队的 Apple 公证凭据。已有钥匙串配置时可运行 `PDFSEE_NOTARY_PROFILE=你的配置名 npm run package:mac`。也支持 PicSee 使用的 `APPLE_ID`、`APPLE_TEAM_ID` 和 `APPLE_APP_PASSWORD` 环境变量。公证完成后，脚本会装订票据并验证 Gatekeeper 状态。仅签名的产物以 `-signed.dmg` 结尾，已公证的产物以架构名结尾。
 
+## GitHub 自动生成 DMG
+
+发布工作流位于 `.github/workflows/release.yml`。在仓库 Settings → Secrets and variables → Actions 配置与 PicSee 同名的六项 Secrets。
+
+| Secret | 内容 |
+| --- | --- |
+| `MACOS_CERTIFICATE_BASE64` | 包含私钥的 Developer ID Application P12 文件的 Base64 |
+| `MACOS_CERTIFICATE_PASSWORD` | P12 导出密码 |
+| `KEYCHAIN_PASSWORD` | runner 临时钥匙串密码 |
+| `APPLE_ID` | Apple 公证账号邮箱 |
+| `APPLE_TEAM_ID` | 证书所属团队 ID |
+| `APPLE_APP_PASSWORD` | Apple 账号的 App 专用密码 |
+
+推送与 `package.json` 版本一致的标签（例如 `v0.1.0`）会自动构建 Universal DMG，支持 Apple Silicon 和 Intel，并上传至对应 GitHub Release。也可以在 Actions 中手动运行工作流，选择 Universal、arm64 或 x64，通过该次运行的 Artifacts 下载产物。
+
+工作流依次执行测试、导入证书、签名应用与 DMG、Apple 公证、装订票据、Gatekeeper 校验和上传。全部验证通过后上传版本化 DMG、固定下载名 `PDFSee.dmg` 和 `SHA256SUMS.txt`。公证失败会使工作流失败，签名材料在任务结束时清理。
+
 ## 项目结构
 
 - `src/` 包含阅读器界面、搜索和工具交互。
