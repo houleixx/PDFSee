@@ -1,0 +1,14 @@
+# Cache static assets for 1 year with immutable
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
+
+# HTML pages should revalidate
+/*
+  X-Content-Type-Options: nosniff
+
+# Robots and sitemap cached for 1 hour
+/robots.txt
+  Cache-Control: public, max-age=3600
+/sitemap.xml
+  Cache-Control: public, max-age=3600
