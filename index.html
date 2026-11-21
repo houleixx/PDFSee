@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>PDFSee</title>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand"><span class="brand-mark"><i class="icon icon-file-text" aria-hidden="true"></i></span><span>PDFSee</span></div>
+      <nav aria-label="工作区">
+        <div class="nav-label">工作区</div>
+        <button class="nav-item active" data-mode="read"><i class="icon icon-book-open"></i>阅读 PDF</button>
+        <div class="nav-label">页面工具</div>
+        <button class="nav-item" data-mode="merge"><i class="icon icon-layers"></i>合并 PDF</button>
+        <button class="nav-item" data-mode="split"><i class="icon icon-scissors"></i>拆分 PDF</button>
+        <button class="nav-item" data-mode="extract"><i class="icon icon-files"></i>提取页面</button>
+        <button class="nav-item" data-mode="organize"><i class="icon icon-layout-grid"></i>整理页面</button>
+        <div class="nav-label">转换工具</div>
+        <button class="nav-item" data-mode="image"><i class="icon icon-image"></i>图片转 PDF</button>
+        <button class="nav-item" data-mode="office"><i class="icon icon-file-type"></i>文档转 PDF</button>
+      </nav>
+      <div class="local"><span></span> 文件在本机处理</div>
+    </aside>
+
+    <main class="main">
+      <header class="masthead"><div id="section-title">阅读 PDF</div><button id="open-file" class="button secondary"><i class="icon icon-folder-open"></i>打开 PDF</button></header>
+      <section id="home" class="home" aria-label="打开 PDF">
+        <div class="welcome">
+          <div class="paper-art" aria-hidden="true"><span class="paper-back"></span><span class="paper-face"><span class="paper-fold"></span><span class="paper-type">PDF</span><span class="paper-lines"></span></span></div>
+          <h1>打开一份 PDF</h1>
+          <p>将文件拖到此处，或从电脑选择文件。</p>
+          <button class="button primary" id="home-open"><i class="icon icon-folder-open"></i>选择 PDF 文件</button>
+          <kbd id="open-key">⌘ O</kbd>
+        </div>
+        <div class="quick"><h2>常用工具</h2><div class="quick-list">
+          <button data-mode="merge"><i class="icon icon-layers"></i><span>合并 PDF</span><i class="icon icon-arrow-up-right"></i></button>
+          <button data-mode="split"><i class="icon icon-scissors"></i><span>拆分 PDF</span><i class="icon icon-arrow-up-right"></i></button>
+          <button data-mode="image"><i class="icon icon-image"></i><span>图片转 PDF</span><i class="icon icon-arrow-up-right"></i></button>
+        </div></div>
+      </section>
+
+      <section id="reader" class="reader" aria-label="PDF 阅读器" hidden>
+        <div class="toolbar">
+          <button id="toggle-sidebar" class="square" title="切换侧栏" aria-label="切换侧栏" aria-expanded="true"><i class="icon icon-panel-left"></i></button>
+          <span class="divider"></span>
+          <button id="previous" class="square" title="上一页" aria-label="上一页"><i class="icon icon-chevron-up"></i></button>
+          <input id="number" type="number" min="1" aria-label="页码">
+          <span id="total"></span>
+          <button id="next" class="square" title="下一页" aria-label="下一页"><i class="icon icon-chevron-down"></i></button>
+          <span class="divider"></span>
+          <button id="zoom-out" class="square" title="缩小" aria-label="缩小"><i class="icon icon-minus"></i></button>
+          <select id="zoom" aria-label="缩放">
+            <option value="auto">自动缩放</option>
+            <option value="page-fit">适合整页</option><option value="page-width">适合宽度</option>
+            <option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
+            <option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option>
+            <option value="3">300%</option><option value="4">400%</option>
+          </select>
+          <button id="zoom-in" class="square" title="放大" aria-label="放大"><i class="icon icon-plus"></i></button>
+          <span class="toolbar-spacer"></span>
+          <button id="rotate" class="square" title="旋转视图" aria-label="旋转视图"><i class="icon icon-rotate-cw"></i></button>
+          <button id="find" class="square" title="查找" aria-label="查找"><i class="icon icon-search"></i></button>
+          <button id="export-image" class="square" title="当前页导出 PNG" aria-label="当前页导出 PNG"><i class="icon icon-download"></i></button>
+          <button id="close-file" class="square" title="关闭文档" aria-label="关闭文档"><i class="icon icon-x"></i></button>
+        </div>
+        <div id="find-bar" class="find-bar" hidden>
+          <input id="search" type="search" placeholder="在 PDF 中查找" aria-label="查找文字">
+          <span id="matches" role="status"></span>
+          <button id="find-prev" class="square" aria-label="上一个匹配"><i class="icon icon-chevron-up"></i></button>
+          <button id="find-next" class="square" aria-label="下一个匹配"><i class="icon icon-chevron-down"></i></button>
+          <button id="find-close" class="square" aria-label="关闭查找"><i class="icon icon-x"></i></button>
+        </div>
+        <div class="reading-body">
+          <aside id="sidebar" class="reader-sidebar" aria-label="文档导航">
+            <div class="sidebar-tabs"><button data-panel="thumbnails" class="active">页面</button><button data-panel="outline">目录</button></div>
+            <div id="thumbnails" class="side-content"></div><div id="outline" class="side-content" hidden></div>
+          </aside>
+          <div class="viewport"><div id="viewer-container" tabindex="0"><div id="viewer" class="pdfViewer"></div></div></div>
+        </div>
+      </section>
+
+      <section id="tools" class="tools" aria-label="PDF 工具" hidden>
+        <div class="tool-inner">
+          <div id="tool-icon" class="tool-icon"></div>
+          <h1 id="tool-title"></h1><p id="tool-description"></p>
+          <button id="tool-picker" class="file-picker"><i class="icon icon-upload"></i><strong id="pick-label">选择文件</strong><span id="pick-hint"></span></button>
+          <button id="use-current" class="button secondary" hidden><i class="icon icon-file-text"></i>使用正在阅读的 PDF</button>
+          <ol id="file-list" class="file-list"></ol>
+
+          <form id="tool-form">
+            <div id="page-options" class="field" hidden>
+              <label for="page-spec">页码范围或新顺序</label>
+              <input id="page-spec" placeholder="例如 1-3, 5, 8-6">
+              <small id="spec-hint">留空使用全部页面。可按你输入的顺序导出。</small>
+            </div>
+            <div id="split-options" class="field" hidden>
+              <label for="group-size">每份页数</label><input id="group-size" type="number" min="1" max="10000" value="1">
+              <small>选择输出目录后，每组页面会保存为单独的 PDF。</small>
+            </div>
+            <div id="rotation-options" class="field" hidden>
+              <label for="rotation">顺时针旋转</label>
+              <select id="rotation"><option value="0">保持原方向</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select>
+            </div>
+            <div id="paper-options" class="field" hidden>
+              <label for="paper">纸张尺寸</label>
+              <select id="paper"><option value="original">适合图片尺寸</option><option value="a4">A4</option><option value="letter">Letter</option></select>
+            </div>
+            <button id="run-tool" class="button primary" type="submit"><i class="icon icon-arrow-right"></i><span id="run-label">导出</span></button>
+          </form>
+        </div>
+      </section>
+
+      <footer class="status" role="status"><span id="status-text">就绪</span><button id="reveal" hidden>在文件夹中显示 <i class="icon icon-arrow-up-right"></i></button></footer>
+    </main>
+  </div>
+  <dialog id="password-dialog">
+    <form method="dialog">
+      <h2 id="password-title">输入 PDF 密码</h2>
+      <input id="password" type="password" aria-label="PDF 密码" required>
+      <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>取消</button><button class="button primary" value="unlock">打开</button></div>
+    </form>
+  </dialog>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

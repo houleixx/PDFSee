@@ -1,0 +1,57 @@
+{
+  "name": "pdfsee",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local PDF reader and page tools",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "build": "vite build && node scripts/viewer-assets.cjs",
+    "start": "npm run build && electron .",
+    "package": "npm run build && electron-builder",
+    "test": "node --test"
+  },
+  "build": {
+    "appId": "com.pdfsee.desktop",
+    "productName": "PDFSee",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "desktop/**",
+      "package.json",
+      "LICENSE"
+    ],
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/PDFSee.icns",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/PDFSee.ico"
+    },
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF 文档",
+        "role": "Viewer"
+      }
+    ]
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1"
+  },
+  "devDependencies": {
+    "electron": "45.4.1",
+    "electron-builder": "26.18.0",
+    "pdfjs-dist": "5.6.205",
+    "vite": "^7.3.1",
+    "typescript": "^5.9.3",
+    "lucide-static": "1.72.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "license": "MIT"
+}
