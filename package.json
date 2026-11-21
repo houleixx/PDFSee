@@ -8,6 +8,7 @@
     "build": "vite build && node scripts/viewer-assets.cjs",
     "start": "npm run build && electron .",
     "package": "npm run build && electron-builder",
+    "package:mac": "bash scripts/package-mac.sh",
     "test": "node --test"
   },
   "build": {

@@ -34,10 +34,12 @@ npm test
 
 测试覆盖页码解析、导出页顺序、旋转、合并和图片转 PDF。
 
-- 在 macOS 执行 `npm run package -- --mac`，生成 DMG。
+- 在 macOS 执行 `npm run package:mac`，生成当前架构的 Developer ID 签名 DMG。可传入 `-- --arm64`、`-- --x64` 或 `-- --universal` 指定架构。
 - 在 Windows 执行 `npm run package -- --win`，生成 NSIS 安装程序。
 
-打包产物输出到 `release/`。公开分发时，可通过 electron-builder 配置代码签名和 macOS 公证。
+打包产物输出到 `release/`。macOS 脚本默认使用钥匙串中与 PicSee 相同团队的 Developer ID Application 身份。使用其他团队时，可设置 `PDFSEE_MAC_TEAM_ID`。
+
+公开分发时，使用同团队的 Apple 公证凭据。已有钥匙串配置时可运行 `PDFSEE_NOTARY_PROFILE=你的配置名 npm run package:mac`。也支持 PicSee 使用的 `APPLE_ID`、`APPLE_TEAM_ID` 和 `APPLE_APP_PASSWORD` 环境变量。公证完成后，脚本会装订票据并验证 Gatekeeper 状态。仅签名的产物以 `-signed.dmg` 结尾，已公证的产物以架构名结尾。
 
 ## 项目结构
 
