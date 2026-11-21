@@ -220,7 +220,7 @@ app.on('open-file', (event, path) => {
 function createWindow() {
   window = new BrowserWindow({
     width: 1250, height: 820, minWidth: 740, minHeight: 570,
-    title: 'PDFSee', backgroundColor: '#f3f1eb',
+    title: 'PDFSee', backgroundColor: '#fafaf9',
     webPreferences: { preload: join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
   });
   const owner = window.webContents.id;
