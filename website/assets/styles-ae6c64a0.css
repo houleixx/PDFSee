@@ -305,19 +305,15 @@ a {
 }
 
 .hero-image {
-  position: relative;
-  aspect-ratio: 6 / 5;
-  overflow: hidden;
-  border-radius: var(--radius);
-  box-shadow: 0 -6px 20px rgba(23, 23, 22, 0.08), 0 12px 40px rgba(23, 23, 22, 0.12), 0 4px 10px rgba(23, 23, 22, 0.06);
+  min-width: 0;
 }
 
-.hero-image img {
+.hero-image img,
+.story-image img {
   width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(23, 23, 22, 0.09);
 }
 
 /* ========== Story Sections ========== */
@@ -379,12 +375,6 @@ a {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 4px;
-}
-
-.story-image img {
-  width: 100%;
-  border-radius: var(--radius);
-  box-shadow: 0 -6px 20px rgba(23, 23, 22, 0.08), 0 12px 40px rgba(23, 23, 22, 0.12), 0 4px 10px rgba(23, 23, 22, 0.06);
 }
 
 /* ========== Format Strip ========== */

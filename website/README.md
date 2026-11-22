@@ -15,17 +15,17 @@ website/
     index.html                  # 英文首页
   404.html                      # 404 页面（双语）
   assets/
-    styles-5a8ae90b.css         # 样式表
+    styles-ae6c64a0.css         # 样式表
     language-d8e2f1a3.js        # 语言检测脚本
     brand-mark-c3d4e5f6.png     # 品牌图标（导航和页脚）
     favicon-a1b2c3d4.png        # 96x96 图标
     social-preview-b5886caf.jpg # 社交分享预览图（1200x630）
-    hero-app-preview-4a3351d5.webp  # Hero 区域展示图（1200x1000）
-    feature-read-pdf-fd5dce87.webp  # 功能1：阅读 PDF（1080x720）
-    feature-merge-pdf-2d0f8a3a.webp   # 功能2：合并 PDF（1080x720）
-    feature-split-pdf-5970590f.webp   # 功能3：拆分 PDF（1080x720）
-    feature-extract-pages-b0e749c8.webp # 功能4：提取页面（1080x720）
-    feature-convert-pdf-1b73e696.webp   # 功能5：转换 PDF（1080x720）
+    hero-app-preview-aab10efb.webp  # Hero 区域展示图（1200x1006）
+    feature-read-pdf-5c7d8823.webp  # 功能1：阅读 PDF（1080x720）
+    feature-merge-pdf-928ad78d.webp   # 功能2：合并 PDF（1080x729）
+    feature-split-pdf-54c9f488.webp   # 功能3：拆分 PDF（1080x900）
+    feature-extract-pages-3c7bcf2f.webp # 功能4：提取页面（1080x777）
+    feature-convert-pdf-ade1cd26.webp   # 功能5：转换 PDF（1080x729）
   robots.txt
   sitemap.xml
   _headers                      # Cloudflare 缓存头
