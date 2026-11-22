@@ -33,13 +33,12 @@ button .icon { flex: none; }
 .shell { display: grid; grid-template-columns: 212px minmax(0, 1fr); height: 100dvh; }
 .rail { display: flex; flex-direction: column; padding: 25px 17px 17px; border-right: 1px solid var(--rule); background: var(--rail); }
 .brand { display: flex; align-items: center; gap: 11px; margin: 0 0 28px 9px; font: 700 29px/.95 Georgia, serif; letter-spacing: -.05em; color: var(--ink); }
-.brand-mark { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 9px; color: #fff; background: var(--accent); }
-.brand-mark .icon { font-size: 20px; }
+.brand-mark { display: block; width: 35px; height: 35px; object-fit: contain; }
 .nav-label { margin: 19px 9px 6px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .09em; }
 .nav-item { display: flex; width: 100%; gap: 10px; align-items: center; padding: 8px 10px; min-height: 37px; border: 1px solid transparent; border-radius: 7px; background: transparent; text-align: left; }
 .nav-item:hover, .square:hover, .sidebar-tabs button:hover { background: var(--hover); }
 .nav-item.active { border-color: var(--accent-border); background: var(--accent-tint); color: var(--ink); font-weight: 650; }
-.nav-item.active .icon, .nav-item[data-mode="image"] .icon, .nav-item[data-mode="office"] .icon,
+.nav-item.active .icon, .nav-item[data-mode="image"] .icon, .nav-item[data-mode="raster"] .icon, .nav-item[data-mode="office"] .icon,
 #open-file .icon { color: var(--accent); }
 .local { margin-top: auto; color: var(--muted); padding: 12px 8px 0; border-top: 1px solid var(--rule); font-size: 12px; }
 .local span { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: #456860; }

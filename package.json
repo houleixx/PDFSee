@@ -1,6 +1,6 @@
 {
   "name": "pdfsee",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Local PDF reader and page tools",
   "main": "desktop/main.cjs",
@@ -9,6 +9,7 @@
     "start": "npm run build && electron .",
     "package": "npm run build && electron-builder",
     "package:mac": "bash scripts/package-mac.sh",
+    "package:win": "npm run package -- --win nsis --x64 --publish never",
     "test": "node --test"
   },
   "build": {
@@ -24,13 +25,16 @@
       "LICENSE"
     ],
     "mac": {
-      "target": "dmg",
+      "target": "dir",
       "icon": "assets/PDFSee.icns",
       "category": "public.app-category.productivity"
     },
     "win": {
       "target": "nsis",
       "icon": "assets/PDFSee.ico"
+    },
+    "nsis": {
+      "artifactName": "PDFSee-windows-${version}.${ext}"
     },
     "fileAssociations": [
       {

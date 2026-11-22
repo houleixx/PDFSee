@@ -1,7 +1,9 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell, utilityProcess } = require('electron');
 const { mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
 const { basename, dirname, extname, join, resolve, sep } = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { imagePages, createImageExport } = require('./image-export.cjs');
+const { createUpdater } = require('./updates.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'pdfsee', privileges: {
   standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true
@@ -24,6 +26,31 @@ const mimeTypes = {
 };
 let window;
 let busy = false;
+let imageExport = null;
+const checkForUpdates = createUpdater({
+  app, dialog, shell, net, getWindow: () => window,
+  beginInstall: () => {
+    if (busy) return false;
+    busy = true;
+    return true;
+  },
+  endInstall: () => { busy = false; }
+});
+
+async function cancelImages() {
+  const active = imageExport;
+  if (!active) return;
+  imageExport = null;
+  try { await active.session.cancel(); }
+  finally { busy = false; }
+}
+
+function getImageExport(owner, token) {
+  if (!imageExport || imageExport.owner !== owner || imageExport.token !== token) {
+    throw new Error('图片导出任务已结束，请重新导出。');
+  }
+  return imageExport.session;
+}
 
 function kindOf(path) {
   const extension = extname(path).slice(1).toLowerCase();
@@ -180,6 +207,39 @@ handle('read', async (owner, id, start, end) => {
   } finally { await fd.close(); }
 });
 handle('execute', execute);
+handle('begin-images', async (owner, id, spec, count) => {
+  if (busy) throw new Error('正在处理另一个任务，请稍后再试。');
+  const file = getFile(id, owner, 'pdf');
+  const pages = imagePages(spec, count);
+  busy = true;
+  try {
+    const result = await dialog.showOpenDialog(window, {
+      title: '选择图片导出目录', properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(file.path)
+    });
+    if (result.canceled || !window || window.webContents.id !== owner) { busy = false; return null; }
+    const session = await createImageExport(result.filePaths[0], basename(file.path, extname(file.path)), pages);
+    if (!window || window.webContents.id !== owner) {
+      await session.cancel();
+      busy = false;
+      return null;
+    }
+    const token = randomUUID();
+    imageExport = { token, owner, session };
+    return { token, pages };
+  } catch (error) { busy = false; throw error; }
+});
+handle('write-image', async (owner, token, bytes) => getImageExport(owner, token).append(bytes));
+handle('finish-images', (owner, token) => {
+  const result = getImageExport(owner, token).finish();
+  outputs.add(result.location);
+  imageExport = null;
+  busy = false;
+  return result;
+});
+handle('cancel-images', async (owner, token) => {
+  getImageExport(owner, token);
+  await cancelImages();
+});
 handle('save-image', async (_owner, name, bytes) => {
   if (typeof name !== 'string' || !(bytes instanceof Uint8Array) || bytes.length > 100 * 1024 * 1024) throw new Error('图像过大，无法导出。');
   const path = await chooseOutput(basename(name).replaceAll(/[:*?"<>|]/g, '_'), 'png');
@@ -225,11 +285,13 @@ function createWindow() {
   });
   const owner = window.webContents.id;
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('render-process-gone', () => { void cancelImages().catch(() => {}); });
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   window.webContents.session.setPermissionCheckHandler(() => false);
   void window.loadURL('pdfsee://app/index.html');
   window.on('closed', () => {
+    void cancelImages().catch(() => {});
     ready.delete(owner);
     for (const [id, file] of registered) if (file.owner === owner) registered.delete(id);
     window = null;
@@ -260,8 +322,14 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     const send = command => () => window?.webContents.send('menu', command);
+    const updateItem = { label: '检查更新…', click: checkForUpdates };
     Menu.setApplicationMenu(Menu.buildFromTemplate([
-      ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+      ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
+        { role: 'about' }, updateItem, { type: 'separator' },
+        { role: 'services' }, { type: 'separator' },
+        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { type: 'separator' }, { role: 'quit' }
+      ] }] : []),
       { label: '文件', submenu: [
         { label: '打开 PDF…', accelerator: 'CmdOrCtrl+O', click: send('open') },
         { label: '关闭文档', accelerator: 'CmdOrCtrl+Shift+W', click: send('close') },
@@ -270,7 +338,8 @@ if (!app.requestSingleInstanceLock()) {
       ] },
       { label: '编辑', submenu: [{ role: 'copy', label: '复制' }, { role: 'selectAll', label: '全选' },
         { label: '在 PDF 中查找', accelerator: 'CmdOrCtrl+F', click: send('find') }] },
-      { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'togglefullscreen', label: '全屏' }] }
+      { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'togglefullscreen', label: '全屏' }] },
+      ...(process.platform === 'win32' ? [{ label: '帮助', submenu: [updateItem] }] : [])
     ]));
     createWindow();
     for (const file of process.argv.slice(app.isPackaged ? 1 : 2)) void openFromSystem(file);

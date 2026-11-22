@@ -43,6 +43,14 @@ elif [[ -n "${APPLE_ID:-}${APPLE_TEAM_ID:-}${APPLE_APP_PASSWORD:-}" ]]; then
   notary_args=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
 fi
 
+# 先验证 Apple 服务认证，避免完成耗时的签名打包后才发现凭据失效。
+if [[ -n "${profile}${APPLE_ID:-}" ]]; then
+  if ! xcrun notarytool history "${notary_args[@]}" >/dev/null; then
+    echo 'Apple 公证凭据校验失败，请检查网络及公证账号配置。若返回 401，请核对 APPLE_ID、APPLE_TEAM_ID，并更新 APPLE_APP_PASSWORD 为该账号的 App 专用密码；使用钥匙串配置时请更新对应配置。' >&2
+    exit 1
+  fi
+fi
+
 output="$PWD/release"
 mkdir -p "$output"
 stage=$(mktemp -d "$output/.pdfsee-dmg.XXXXXX")
@@ -59,14 +67,20 @@ cleanup() {
 trap cleanup EXIT
 
 version=$(node -p 'require("./package.json").version')
-name="PDFSee-$version-$arch"
+name="PDFSee-macos-$version"
+if [[ "$arch" != universal ]]; then
+  name="$name-$arch"
+fi
 dmg="$stage/$name.dmg"
 # 公证提交最终签名的 DMG，由 Apple 同时检查其中的应用。
-npm run package -- --mac dmg "--$arch" \
-  "--config.directories.output=$stage" "--config.dmg.artifactName=$name.dmg" \
+npm run package -- --mac dir "--$arch" --publish never \
+  "--config.directories.output=$stage" \
   "--config.mac.identity=$team_id" --config.mac.notarize=false \
-  --config.forceCodeSigning=true --config.dmg.writeUpdateInfo=false
+  --config.forceCodeSigning=true
 
+app_path=$(find "$stage" -path '*/PDFSee.app' -prune -print)
+[[ -d "$app_path" ]] || { echo '找不到打包后的 PDFSee.app。' >&2; exit 1; }
+bash scripts/create-dmg.sh "$app_path" "$dmg"
 requirement="anchor apple generic and certificate leaf[subject.OU] = \"$team_id\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
 codesign --sign "$identity" --timestamp "$dmg"
 codesign --verify --strict --test-requirement="=$requirement" "$dmg"

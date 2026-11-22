@@ -9,7 +9,7 @@
 <body>
   <div class="shell">
     <aside class="rail">
-      <div class="brand"><span class="brand-mark"><i class="icon icon-file-text" aria-hidden="true"></i></span><span>PDFSee</span></div>
+      <div class="brand"><img class="brand-mark" src="/images/pdfsee-icon.png" alt="" width="35" height="35"><span>PDFSee</span></div>
       <nav aria-label="工作区">
         <div class="nav-label">工作区</div>
         <button class="nav-item active" data-mode="read"><i class="icon icon-book-open"></i>阅读 PDF</button>
@@ -19,6 +19,7 @@
         <button class="nav-item" data-mode="extract"><i class="icon icon-files"></i>提取页面</button>
         <button class="nav-item" data-mode="organize"><i class="icon icon-layout-grid"></i>整理页面</button>
         <div class="nav-label">转换工具</div>
+        <button class="nav-item" data-mode="raster"><i class="icon icon-images"></i>PDF 转图片</button>
         <button class="nav-item" data-mode="image"><i class="icon icon-image"></i>图片转 PDF</button>
         <button class="nav-item" data-mode="office"><i class="icon icon-file-type"></i>文档转 PDF</button>
       </nav>
@@ -29,7 +30,7 @@
       <header class="masthead"><div id="section-title">阅读 PDF</div><button id="open-file" class="button secondary"><i class="icon icon-folder-open"></i>打开 PDF</button></header>
       <section id="home" class="home" aria-label="打开 PDF">
         <div class="welcome">
-          <img class="paper-art" src="/images/pdf-paper.png" alt="" width="106" height="104">
+          <img class="paper-art" src="/images/pdfsee-icon.png" alt="" width="106" height="104">
           <h1>打开一份 PDF</h1>
           <p>将文件拖到此处，或从电脑选择文件。</p>
           <button class="button primary" id="home-open"><i class="icon icon-folder-open"></i>选择 PDF 文件</button>
@@ -91,8 +92,13 @@
           <ol id="file-list" class="file-list"></ol>
 
           <form id="tool-form">
+            <div id="image-range-options" class="field" hidden>
+              <label for="image-range">导出页面</label>
+              <select id="image-range"><option value="all">全部页面</option><option value="custom">指定页码</option></select>
+              <small>每页保存为一张 PNG 图片，文件名保留原页码。</small>
+            </div>
             <div id="page-options" class="field" hidden>
-              <label for="page-spec">页码范围或新顺序</label>
+              <label id="page-spec-label" for="page-spec">页码范围或新顺序</label>
               <input id="page-spec" placeholder="例如 1-3, 5, 8-6">
               <small id="spec-hint">留空使用全部页面。可按你输入的顺序导出。</small>
             </div>
@@ -109,6 +115,7 @@
               <select id="paper"><option value="original">适合图片尺寸</option><option value="a4">A4</option><option value="letter">Letter</option></select>
             </div>
             <button id="run-tool" class="button primary" type="submit"><i class="icon icon-arrow-right"></i><span id="run-label">导出</span></button>
+            <button id="cancel-images" class="button secondary" type="button" hidden>取消转换</button>
           </form>
         </div>
       </section>
