@@ -15,37 +15,25 @@ website/
     index.html                  # 英文首页
   404.html                      # 404 页面（双语）
   assets/
-    styles-f4a7b2c9.css         # 样式表
+    styles-5a8ae90b.css         # 样式表
     language-d8e2f1a3.js        # 语言检测脚本
     brand-mark-c3d4e5f6.png     # 品牌图标（导航和页脚）
     favicon-a1b2c3d4.png        # 96x96 图标
-    social-preview-e5f6g7h8.jpg # 社交分享预览图（1200x1000）
-    hero-app-preview-b2c3d4e5.webp  # Hero 区域展示图（1200x1000）
-    feature-read-pdf-c4d5e6f7.webp  # 功能1：阅读 PDF（1080x720）
-    feature-merge-pdf-d5e6f7g8.webp   # 功能2：合并 PDF（1080x720）
-    feature-split-pdf-e6f7g8h9.webp   # 功能3：拆分 PDF（1080x720）
-    feature-extract-pages-f7g8h9i0.webp # 功能4：提取页面（1080x720）
-    feature-convert-pdf-g8h9i0j1.webp   # 功能5：转换 PDF（1080x720）
+    social-preview-b5886caf.jpg # 社交分享预览图（1200x630）
+    hero-app-preview-4a3351d5.webp  # Hero 区域展示图（1200x1000）
+    feature-read-pdf-fd5dce87.webp  # 功能1：阅读 PDF（1080x720）
+    feature-merge-pdf-2d0f8a3a.webp   # 功能2：合并 PDF（1080x720）
+    feature-split-pdf-5970590f.webp   # 功能3：拆分 PDF（1080x720）
+    feature-extract-pages-b0e749c8.webp # 功能4：提取页面（1080x720）
+    feature-convert-pdf-1b73e696.webp   # 功能5：转换 PDF（1080x720）
   robots.txt
   sitemap.xml
   _headers                      # Cloudflare 缓存头
 ```
 
-## 需要的图片
+## 产品截图
 
-以下图片需要创建：
-
-1. **brand-mark-c3d4e5f6.png** - 品牌图标，28x28 显示，建议使用 PDFSee 应用图标
-2. **favicon-a1b2c3d4.png** - 96x96 网站图标
-3. **social-preview-e5f6g7h8.jpg** - 社交分享预览，1200x1000，展示应用界面
-4. **hero-app-preview-b2c3d4e5.webp** - Hero 展示图，1200x1000，应用界面截图或插画
-5. **feature-read-pdf-c4d5e6f7.webp** - 阅读 PDF 功能截图，1080x720
-6. **feature-merge-pdf-d5e6f7g8.webp** - 合并 PDF 功能截图，1080x720
-7. **feature-split-pdf-e6f7g8h9.webp** - 拆分 PDF 功能截图，1080x720
-8. **feature-extract-pages-f7g8h9i0.webp** - 提取页面功能截图，1080x720
-9. **feature-convert-pdf-g8h9i0j1.webp** - 转换 PDF 功能截图，1080x720
-
-图片文件名包含内容哈希，更新图片时需要同时更新文件名和 HTML 中的引用。
+首屏和功能图来自 PDFSee 的实际界面，使用专为网站生成的样本文档。社交分享图使用应用图标和阅读器截图。更新图片或样式时，请更换文件名中的内容哈希，并同步更新中英文首页的引用，避免 CDN 继续提供旧资源。
 
 ## 本地预览
 
