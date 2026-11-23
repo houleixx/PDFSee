@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, screen, shell, utilityProcess } = require('electron');
 const { readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
 const { basename, dirname, extname, join, resolve, sep } = require('node:path');
@@ -429,11 +429,40 @@ app.on('open-file', (event, path) => {
   void openFromSystem(path);
 });
 
+function restoreWindowPosition(path, width, height) {
+  try {
+    const { x, y } = JSON.parse(readFileSync(path, 'utf8'));
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return {};
+    const { workArea } = screen.getDisplayMatching({ x, y, width, height });
+    return {
+      x: Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - width)),
+      y: Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - height))
+    };
+  } catch {
+    return {};
+  }
+}
+
 function createWindow() {
-  window = new BrowserWindow({
-    width: 1100, height: 820, minWidth: 740, minHeight: 570,
+  const width = 1100;
+  const height = 820;
+  const positionPath = join(app.getPath('userData'), 'window-position.json');
+  const mainWindow = new BrowserWindow({
+    width, height, minWidth: 740, minHeight: 570,
+    ...restoreWindowPosition(positionPath, width, height),
     title: 'PDFSee', backgroundColor: '#fafaf9',
     webPreferences: { preload: join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
+  });
+  window = mainWindow;
+  mainWindow.on('close', () => {
+    const { x, y } = mainWindow.getNormalBounds();
+    try {
+      const temporary = positionPath + '.tmp';
+      writeFileSync(temporary, JSON.stringify({ x, y }));
+      renameSync(temporary, positionPath);
+    } catch (error) {
+      console.warn('无法保存窗口位置', error.code ?? error.message);
+    }
   });
   const owner = window.webContents.id;
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
