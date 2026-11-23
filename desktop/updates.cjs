@@ -183,50 +183,67 @@ async function prepareMacUpdate(dmg, version) {
   }
 }
 
-function createUpdater({ app, dialog, shell, net, getWindow, beginInstall, endInstall }) {
+function createUpdater({ app, show, shell, net, getWindow, beginInstall, endInstall, onProgress }) {
   const fetchRelease = (url, options) => net.fetch(url, options);
   let inProgress = false;
-  const show = options => {
+  const reportProgress = progress => {
     const window = getWindow();
-    return window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
+    window?.setProgressBar(progress ? (progress.percent === null ? 2 : progress.percent / 100) : -1);
+    onProgress(progress);
   };
 
-  return async function checkForUpdates() {
+  return async function checkForUpdates({ automatic = false } = {}) {
     if (inProgress) return;
     inProgress = true;
     let directory;
     let keepDownload = false;
-    let downloading = false;
+    let accepted = false;
     let installing = false;
     try {
       const arch = process.platform === 'darwin' && app.runningUnderARM64Translation ? 'arm64' : process.arch;
       const update = await findUpdate(fetchRelease, app.getVersion(), process.platform, arch, url => readRedirect(net, url));
       if (!update) {
-        await show({ type: 'info', message: `当前已是最新版本（${app.getVersion()}）。` });
+        if (!automatic) await show({ type: 'info', message: `当前已是最新版本（${app.getVersion()}）。` });
         return;
       }
-      const { response: choice } = await show({
+      const root = join(app.getPath('userData'), 'updates');
+      const ignored = join(root, `ignored-${update.version}`);
+      try {
+        await access(ignored);
+        if (!automatic) await show({ type: 'info', message: `已忽略 PDFSee ${update.version}。` });
+        return;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+
+      if (automatic && !getWindow()) return;
+      const choice = await show({
         type: 'info', message: `发现 PDFSee ${update.version}`,
-        detail: `当前版本为 ${app.getVersion()}。下载安装时，PDFSee 可能会退出。`,
-        buttons: ['下载并安装', '稍后'], defaultId: 0, cancelId: 1
+        detail: `当前版本为 ${app.getVersion()}。安装包将在后台下载，安装时 PDFSee 可能会退出。`,
+        buttons: ['后台下载并安装', '稍后', '忽略此版本'], defaultId: 0, cancelId: 1
       });
+      if (choice === 2) {
+        await mkdir(root, { recursive: true });
+        await writeFile(ignored, '');
+        return;
+      }
       if (choice !== 0) return;
 
-      const root = join(app.getPath('userData'), 'updates');
+      accepted = true;
+      reportProgress({ version: update.version, phase: 'download', percent: null });
       await mkdir(root, { recursive: true });
       directory = await mkdtemp(join(root, 'download-'));
       const path = join(directory, update.name);
-      downloading = true;
-      getWindow()?.setProgressBar(2);
       let percent = -1;
       await downloadUpdate(update, path, progress => {
         const next = Math.floor(progress * 100);
         if (next !== percent) {
           percent = next;
-          getWindow()?.setProgressBar(progress);
+          reportProgress({ version: update.version, phase: 'download', percent });
         }
       }, fetchRelease);
 
+      reportProgress({ version: update.version, phase: 'install', percent: null });
       installing = beginInstall();
       if (!installing) {
         keepDownload = true;
@@ -245,9 +262,13 @@ function createUpdater({ app, dialog, shell, net, getWindow, beginInstall, endIn
       keepDownload = true;
       if (process.platform === 'win32') app.quit();
     } catch (error) {
-      await show({ type: 'error', message: downloading ? '更新失败' : '检查更新失败', detail: error.message });
+      if (!automatic || accepted) {
+        await show({ type: 'error', message: accepted ? '更新失败' : '检查更新失败', detail: error.message });
+      } else {
+        console.warn('自动检查更新失败', error.message);
+      }
     } finally {
-      getWindow()?.setProgressBar(-1);
+      if (accepted) reportProgress(null);
       if (directory && !keepDownload) await rm(directory, { recursive: true, force: true }).catch(console.error);
       if (installing) endInstall();
       inProgress = false;

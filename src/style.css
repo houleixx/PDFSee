@@ -68,6 +68,8 @@ kbd { margin-top: 10px; color: var(--muted); font: 12px "SFMono-Regular", Consol
 .status { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12px; }
 #status-text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .status button { border: 0; background: none; color: var(--accent); white-space: nowrap; }
+#update-progress { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; white-space: nowrap; }
+#update-meter { width: clamp(52px, 12vw, 120px); height: 8px; accent-color: var(--accent); }
 .status.error { color: var(--error); }
 .reader { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }
 .toolbar, .find-bar { display: flex; align-items: center; gap: 5px; padding: 5px 12px; border-bottom: 1px solid var(--rule); background: var(--paper); }
@@ -132,6 +134,37 @@ dialog::backdrop { background: #141a205e; }
 dialog h2 { margin: 0 0 10px; font-size: 19px; }
 dialog input { width: 100%; }
 .dialog-actions { display: flex; justify-content: end; gap: 8px; margin-top: 12px; }
+#update-dialog {
+  width: min(490px, calc(100% - 32px));
+  padding: 24px;
+  box-shadow: 0 20px 56px #141a2033;
+}
+.update-heading { display: flex; align-items: flex-start; gap: 14px; }
+.update-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--accent-border);
+  border-radius: 9px;
+  color: var(--accent-ink);
+  background: var(--accent-tint);
+  font-size: 19px;
+}
+#update-title { margin: 1px 0 0; overflow-wrap: anywhere; }
+#update-detail { margin: 6px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+#update-actions { margin-top: 22px; flex-wrap: wrap; }
+.update-ignore {
+  margin-inline-end: auto;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.update-ignore:hover { color: var(--ink); text-decoration: underline; }
+#update-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media print { #update-dialog, #update-dialog::backdrop { display: none; } }
 @media (max-width: 890px) {
   .shell { grid-template-columns: 172px minmax(0, 1fr); }
   .rail { padding-inline: 12px; }
@@ -176,4 +209,29 @@ dialog input { width: 100%; }
     height: 100%;
     object-fit: contain;
   }
+}
+
+.ocr-layer {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  container-type: size;
+  pointer-events: none;
+  overflow: hidden;
+  color: transparent;
+  font-family: sans-serif;
+}
+.ocr-layer span {
+  position: absolute;
+  white-space: pre;
+  line-height: 1;
+  transform-origin: left top;
+  pointer-events: auto;
+  user-select: text;
+  cursor: text;
+}
+.ocr-layer span::selection {
+  background: rgb(48 122 246 / 32%);
+  color: transparent;
 }

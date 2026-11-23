@@ -6,6 +6,7 @@ import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/legacy/web/pdf_viewer.css';
 import 'lucide-static/font/lucide.css';
 import './style.css';
+import { createPageOcr, type RecognizedLine } from './page-ocr';
 
 type Kind = 'pdf' | 'image' | 'office';
 type FileInfo = { id: string; kind: Kind; name: string; size: number };
@@ -13,7 +14,19 @@ type Output = { name: string; location: string; count?: number; kind?: 'images' 
 type ToolResult = Output & { message?: string } | { message: string };
 type PdfFormat = 'pages' | 'long' | 'flat' | 'pptx' | 'docx';
 type ToolJob = { mode: string; ids: string[]; spec: string; groupSize: number; rotation: number; paper: string };
+type UpdateProgress = { version: string; phase: 'download' | 'install'; percent: number | null };
+type UpdatePrompt = {
+  id: string;
+  type: 'info' | 'error';
+  message: string;
+  detail?: string;
+  buttons?: string[];
+  defaultId?: number;
+  cancelId?: number;
+};
 type Bridge = {
+  canRecognizePages: boolean;
+  recognizePage(bytes: Uint8Array): Promise<RecognizedLine[]>;
   getToolSidebarHidden(): Promise<boolean>;
   setToolSidebarHidden(hidden: boolean): Promise<void>;
   openFeedback(): Promise<void>;
@@ -31,6 +44,9 @@ type Bridge = {
   reveal(path: string): Promise<void>;
   onFile(callback: (file: FileInfo) => void): void;
   onError(callback: (error: string) => void): void;
+  answerUpdatePrompt(id: string, choice: number): Promise<void>;
+  onUpdatePrompt(callback: (prompt: UpdatePrompt) => void): void;
+  onUpdateProgress(callback: (progress: UpdateProgress | null) => void): void;
   onMenu(callback: (command: string) => void): void;
   ready(): Promise<void>;
 };
@@ -113,6 +129,14 @@ const viewer = new PDFViewer({
   annotationEditorMode: -1, imageResourcesPath: asset('web/images'), enableAutoLinking: false
 });
 links.setViewer(viewer);
+const pageOcr = desktop.canRecognizePages
+  ? createPageOcr(viewer.container, bytes => desktop.recognizePage(bytes))
+  : null;
+if (pageOcr) {
+  bus.on('textlayerrendered', ({ source, error }) => {
+    if (!error) pageOcr.observe(source);
+  });
+}
 
 function status(message: string, error = false, result: Output | null = null) {
   output = result;
@@ -222,6 +246,7 @@ function clearReader() {
   closeSearch();
   const dialog = byId<HTMLDialogElement>('password-dialog');
   if (dialog.open) dialog.close('cancel');
+  pageOcr?.reset();
   viewer.setDocument(null);
   links.setDocument(null);
   doc = null;
@@ -954,6 +979,41 @@ document.addEventListener('drop', event => {
 
 desktop.onFile(file => void openDocument(file));
 desktop.onError(errorStatus);
+desktop.onUpdatePrompt(prompt => {
+  const dialog = byId<HTMLDialogElement>('update-dialog');
+  const detail = byId('update-detail');
+  byId('update-title').textContent = prompt.message;
+  detail.textContent = prompt.detail ?? '';
+  detail.hidden = !prompt.detail;
+  const labels = prompt.buttons ?? ['确定'];
+  const primary = prompt.defaultId ?? 0;
+  const order = labels.map((_, index) => index).reverse();
+  byId('update-icon').className = `icon icon-${prompt.type === 'error' ? 'circle-alert' : prompt.buttons ? 'arrow-down-to-line' : 'info'}`;
+  const actions = order.map(index => {
+    const action = document.createElement('button');
+    action.className = index === primary ? 'button primary' : index === 2 ? 'update-ignore' : 'button secondary';
+    action.value = String(index);
+    action.textContent = labels[index];
+    action.autofocus = index === primary;
+    return action;
+  });
+  byId('update-actions').replaceChildren(...actions);
+  dialog.returnValue = String(prompt.cancelId ?? 0);
+  dialog.onclose = () => {
+    void desktop.answerUpdatePrompt(prompt.id, Number(dialog.returnValue)).catch(errorStatus);
+  };
+  if (!dialog.open) dialog.showModal();
+});
+desktop.onUpdateProgress(progress => {
+  byId('update-progress').hidden = !progress;
+  if (!progress) return;
+  const { version, phase, percent } = progress;
+  const label = phase === 'download' ? `正在下载 ${version}` : `正在准备安装 ${version}`;
+  byId('update-label').textContent = percent === null ? label : `${label} · ${percent}%`;
+  const meter = byId<HTMLProgressElement>('update-meter');
+  if (percent === null) meter.removeAttribute('value');
+  else meter.value = percent;
+});
 desktop.onMenu(command => {
   if (command === 'open') void pickPdf();
   if (command === 'close') closeDocument();

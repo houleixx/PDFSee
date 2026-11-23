@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell, utility
 const { readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
 const { basename, dirname, extname, join, resolve, sep } = require('node:path');
+const { execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { imagePages, createImageExport, createFormatExport } = require('./image-export.cjs');
 const { extensions: exportExtensions } = require('./pdf-formats.cjs');
@@ -31,8 +32,16 @@ const mimeTypes = {
 let window;
 let busy = false;
 let imageExport = null;
+let updateProgress = null;
+let updatePrompt = null;
+let startupUpdateChecked = false;
+let startupUpdateTimer;
 const checkForUpdates = createUpdater({
-  app, dialog, shell, net, getWindow: () => window,
+  app, show: showUpdatePrompt, shell, net, getWindow: () => window,
+  onProgress: progress => {
+    updateProgress = progress;
+    if (window && ready.has(window.webContents.id)) window.webContents.send('update-progress', progress);
+  },
   beginInstall: () => {
     if (busy) return false;
     busy = true;
@@ -40,6 +49,23 @@ const checkForUpdates = createUpdater({
   },
   endInstall: () => { busy = false; }
 });
+
+function showUpdatePrompt(options) {
+  const target = window?.webContents;
+  if (!target || target.isDestroyed()) return Promise.resolve(options.cancelId ?? 0);
+  return new Promise(resolve => {
+    const prompt = { id: randomUUID(), ...options };
+    updatePrompt = { owner: target.id, prompt, resolve };
+    if (ready.has(target.id)) target.send('update-prompt', prompt);
+  });
+}
+
+function finishUpdatePrompt(owner, choice) {
+  if (updatePrompt?.owner !== owner) return;
+  const { prompt, resolve } = updatePrompt;
+  updatePrompt = null;
+  resolve(choice ?? prompt.cancelId ?? 0);
+}
 
 async function cancelImages() {
   const active = imageExport;
@@ -90,6 +116,25 @@ function handle(channel, callback) {
     }
   });
 }
+
+handle('recognize-page', (_owner, bytes) => {
+  if (process.platform !== 'darwin' || !(bytes instanceof Uint8Array) || bytes.length > 20 * 1024 * 1024) {
+    throw new Error('无法识别此页面。');
+  }
+  const binary = join(app.isPackaged ? process.resourcesPath : dist, 'pdfsee-ocr');
+  return new Promise((resolve, reject) => {
+    const child = execFile(binary, { timeout: 15000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
+      if (error) {
+        reject(new Error('页面文字识别失败。'));
+        return;
+      }
+      try { resolve(JSON.parse(stdout)); }
+      catch { reject(new Error('无法读取文字识别结果。')); }
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(bytes);
+  });
+});
 
 function runWorker(payload) {
   return new Promise((resolve, reject) => {
@@ -362,8 +407,20 @@ async function openFromSystem(path) {
     if (!target.isDestroyed()) target.send('system-error', error.message);
   }
 }
+handle('answer-update-prompt', (owner, id, choice) => {
+  if (updatePrompt?.owner !== owner || updatePrompt.prompt.id !== id) return;
+  const count = updatePrompt.prompt.buttons?.length ?? 1;
+  if (Number.isInteger(choice) && choice >= 0 && choice < count) finishUpdatePrompt(owner, choice);
+});
+
 handle('ready', owner => {
   ready.add(owner);
+  if (updateProgress) window.webContents.send('update-progress', updateProgress);
+  if (updatePrompt?.owner === owner) window.webContents.send('update-prompt', updatePrompt.prompt);
+  if (!startupUpdateChecked && ['darwin', 'win32'].includes(process.platform)) {
+    startupUpdateChecked = true;
+    startupUpdateTimer = setTimeout(() => { if (window) void checkForUpdates({ automatic: true }); }, 1500).unref();
+  }
   for (const path of new Set(pending.splice(0))) void openFromSystem(path);
 });
 
@@ -381,12 +438,17 @@ function createWindow() {
   });
   const owner = window.webContents.id;
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('render-process-gone', () => { void cancelImages().catch(() => {}); });
+  window.webContents.on('render-process-gone', () => {
+    ready.delete(owner);
+    finishUpdatePrompt(owner);
+    void cancelImages().catch(() => {});
+  });
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   window.webContents.session.setPermissionCheckHandler(() => false);
   void window.loadURL('pdfsee://app/index.html');
   window.on('closed', () => {
+    finishUpdatePrompt(owner);
     void cancelImages().catch(() => {});
     ready.delete(owner);
     for (const [id, file] of registered) if (file.owner === owner) registered.delete(id);
@@ -418,7 +480,12 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     const send = command => () => window?.webContents.send('menu', command);
-    const updateItem = { label: '检查更新…', click: checkForUpdates };
+    const updateItem = { label: '检查更新…', click: () => {
+      startupUpdateChecked = true;
+      clearTimeout(startupUpdateTimer);
+      if (!window) createWindow();
+      void checkForUpdates();
+    } };
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
         { role: 'about' }, updateItem, { type: 'separator' },

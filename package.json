@@ -1,6 +1,6 @@
 {
   "name": "pdfsee",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "Local PDF reader and page tools",
   "main": "desktop/main.cjs",
@@ -20,6 +20,7 @@
     },
     "files": [
       "dist/**",
+      "!dist/pdfsee-ocr",
       "desktop/**",
       "package.json",
       "LICENSE"
@@ -34,7 +35,13 @@
           "zh-Hans",
           "en"
         ]
-      }
+      },
+      "extraResources": [
+        {
+          "from": "dist/pdfsee-ocr",
+          "to": "pdfsee-ocr"
+        }
+      ]
     },
     "win": {
       "target": "nsis",

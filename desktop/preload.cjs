@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('desktop', {
   getToolSidebarHidden: () => invoke('get-tool-sidebar-hidden'),
   setToolSidebarHidden: hidden => invoke('set-tool-sidebar-hidden', hidden),
   openFeedback: () => invoke('open-feedback'),
+  canRecognizePages: process.platform === 'darwin',
+  recognizePage: bytes => invoke('recognize-page', bytes),
   printDocument: () => invoke('print-document'),
   pick: (kind, multi) => invoke('pick', kind, multi),
   drop: files => invoke('drop', files.map(file => webUtils.getPathForFile(file)).filter(Boolean)),
@@ -24,6 +26,9 @@ contextBridge.exposeInMainWorld('desktop', {
   reveal: path => invoke('reveal', path),
   onFile: callback => ipcRenderer.on('system-file', (_event, file) => callback(file)),
   onError: callback => ipcRenderer.on('system-error', (_event, error) => callback(error)),
+  answerUpdatePrompt: (id, choice) => invoke('answer-update-prompt', id, choice),
+  onUpdatePrompt: callback => ipcRenderer.on('update-prompt', (_event, prompt) => callback(prompt)),
+  onUpdateProgress: callback => ipcRenderer.on('update-progress', (_event, progress) => callback(progress)),
   onMenu: callback => ipcRenderer.on('menu', (_event, command) => callback(command)),
   ready: () => invoke('ready')
 });

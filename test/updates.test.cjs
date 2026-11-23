@@ -4,7 +4,7 @@ const { mkdtemp, readFile, rm } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const test = require('node:test');
-const { selectUpdate, findUpdate, downloadUpdate } = require('../desktop/updates.cjs');
+const { createUpdater, selectUpdate, findUpdate, downloadUpdate } = require('../desktop/updates.cjs');
 
 function asset(name, url = `https://github.com/houleixx/PDFSee/releases/download/v1.10.0/${name}`) {
   return { name, browser_download_url: url, size: 100 };
@@ -75,4 +75,96 @@ test('rate-limited API falls back to the latest release redirect and published c
   requested.length = 0;
   assert.equal(await findUpdate(fetchRelease, '1.10.0', 'darwin', 'arm64', getRedirect), null);
   assert.equal(requested.length, 2);
+});
+
+const supported = ['darwin', 'win32'].includes(process.platform);
+
+async function updaterFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'pdfsee-update-flow-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const notices = [];
+  const downloads = [];
+  const progress = [];
+  const opened = [];
+  const state = { current: '1.9.0', release, choice: 1, offline: false };
+  const dependencies = {
+    app: { getVersion: () => state.current, getPath: () => root, quit() {} },
+    async show(options) {
+      notices.push(options);
+      return state.choice;
+    },
+    shell: { async openPath(path) {
+      opened.push(await readFile(path));
+      return '';
+    } },
+    net: { async fetch(url) {
+      if (state.offline) throw new Error('offline');
+      if (url.startsWith('https://api.github.com/')) return Response.json(state.release);
+      downloads.push(url);
+      return new Response(Buffer.alloc(100));
+    } },
+    getWindow: () => ({ setProgressBar() {} }),
+    beginInstall: () => true,
+    endInstall() {},
+    onProgress: value => progress.push(value)
+  };
+  return { state, notices, downloads, progress, opened, newUpdater: () => createUpdater(dependencies) };
+}
+
+test('startup skips an ignored release across restarts and offers a newer release', { skip: !supported }, async t => {
+  const { newUpdater, state, notices, downloads } = await updaterFixture(t);
+  const startup = { automatic: true };
+  state.current = '1.10.0';
+  await newUpdater()(startup);
+  assert.equal(notices.length, 0);
+
+  state.current = '1.9.0';
+  await newUpdater()(startup); // Later
+  state.choice = 2;
+  await newUpdater()(startup); // Ignore
+  await newUpdater()(startup);
+  assert.equal(notices.length, 2);
+  assert.deepEqual(notices[1].buttons, ['后台下载并安装', '稍后', '忽略此版本']);
+  await newUpdater()();
+  assert.match(notices[2].message, /已忽略 PDFSee 1\.10\.0/);
+
+  state.release = {
+    tag_name: 'v1.11.0',
+    assets: release.assets.map(item => ({
+      ...item,
+      name: item.name.replace('1.10.0', '1.11.0'),
+      browser_download_url: item.browser_download_url.replaceAll('1.10.0', '1.11.0')
+    }))
+  };
+  state.choice = 1;
+  await newUpdater()(startup);
+  assert.match(notices[3].message, /发现 PDFSee 1\.11\.0/);
+  assert.equal(downloads.length, 0);
+});
+
+test('accepted updates report download progress and clear the indicator after handoff', { skip: !supported }, async t => {
+  const { newUpdater, state, notices, downloads, progress, opened } = await updaterFixture(t);
+  state.choice = 0;
+  const check = newUpdater();
+  await Promise.all([check({ automatic: true }), check()]);
+  assert.equal(notices.length, 1);
+  assert.equal(downloads.length, 1);
+  assert.deepEqual(opened, [Buffer.alloc(100)]);
+  assert.deepEqual(progress, [
+    { version: '1.10.0', phase: 'download', percent: null },
+    { version: '1.10.0', phase: 'download', percent: 100 },
+    { version: '1.10.0', phase: 'install', percent: null },
+    null
+  ]);
+});
+
+test('startup network failures stay silent and manual failures are shown', async t => {
+  const { newUpdater, state, notices, progress } = await updaterFixture(t);
+  state.offline = true;
+  const check = newUpdater();
+  await check({ automatic: true });
+  assert.equal(notices.length, 0);
+  await check();
+  assert.equal(notices[0].message, '检查更新失败');
+  assert.deepEqual(progress, []);
 });

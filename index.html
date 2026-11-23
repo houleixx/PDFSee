@@ -130,7 +130,14 @@
         </div>
       </section>
 
-      <footer class="status" role="status"><span id="status-text">就绪</span><button id="reveal" hidden>在文件夹中显示 <i class="icon icon-arrow-up-right"></i></button></footer>
+      <footer class="status">
+        <span id="status-text" role="status">就绪</span>
+        <button id="reveal" hidden>在文件夹中显示 <i class="icon icon-arrow-up-right"></i></button>
+        <div id="update-progress" hidden>
+          <span id="update-label"></span>
+          <progress id="update-meter" max="100" aria-labelledby="update-label"></progress>
+        </div>
+      </footer>
     </main>
   </div>
   <div id="success-toast" class="success-toast" aria-hidden="true" hidden>
@@ -138,6 +145,18 @@
     <span id="success-toast-text"></span>
   </div>
   <div id="print-pages" aria-hidden="true"></div>
+  <dialog id="update-dialog" aria-labelledby="update-title" aria-describedby="update-detail">
+    <form method="dialog">
+      <div class="update-heading">
+        <span class="update-icon" aria-hidden="true"><i id="update-icon" class="icon icon-arrow-down-to-line"></i></span>
+        <div>
+          <h2 id="update-title"></h2>
+          <p id="update-detail"></p>
+        </div>
+      </div>
+      <div class="dialog-actions" id="update-actions"></div>
+    </form>
+  </dialog>
   <dialog id="password-dialog">
     <form method="dialog">
       <h2 id="password-title">输入 PDF 密码</h2>
