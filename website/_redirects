@@ -1,0 +1,3 @@
+# Keep the app feedback URL stable when the destination changes.
+/feedback https://xhslink.cn/o/8nEF3szy5mW 302
+/feedback/ https://xhslink.cn/o/8nEF3szy5mW 302

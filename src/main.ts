@@ -16,6 +16,7 @@ type ToolJob = { mode: string; ids: string[]; spec: string; groupSize: number; r
 type Bridge = {
   getToolSidebarHidden(): Promise<boolean>;
   setToolSidebarHidden(hidden: boolean): Promise<void>;
+  openFeedback(): Promise<void>;
   printDocument(): Promise<boolean>;
   pick(kind: Kind, multi: boolean): Promise<FileInfo[]>;
   drop(files: File[]): Promise<FileInfo[]>;
@@ -861,6 +862,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach(element => 
     if (element.dataset.panel === 'outline') void renderOutline().catch(errorStatus);
   };
 });
+click('open-feedback', () => { void desktop.openFeedback().catch(errorStatus); });
 click('open-file', () => void pickPdf());
 click('home-open', () => void pickPdf());
 click('close-file', closeDocument);

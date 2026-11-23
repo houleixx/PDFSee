@@ -6,6 +6,10 @@
 
 网站目录 `website/` 直接作为 Cloudflare Pages 的构建输出目录。无需构建步骤。
 
+## 问题反馈
+
+应用顶部的「反馈」按钮和中英文首页页脚都打开 `https://pdfsee.pages.dev/feedback`。Cloudflare Pages 部署后，`_redirects` 将 `/feedback` 与 `/feedback/` 以 302 跳转到小红书反馈帖。以后更换帖子时，只需更新这两条网站规则。
+
 ## 目录结构
 
 ```
@@ -30,6 +34,7 @@ website/
   robots.txt
   sitemap.xml
   _headers                      # Cloudflare 缓存头
+  _redirects                    # 官网反馈跳转
 ```
 
 ## 产品截图

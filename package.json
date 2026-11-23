@@ -1,6 +1,6 @@
 {
   "name": "pdfsee",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Local PDF reader and page tools",
   "main": "desktop/main.cjs",

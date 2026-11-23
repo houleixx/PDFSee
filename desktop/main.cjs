@@ -230,6 +230,8 @@ handle('set-tool-sidebar-hidden', (_owner, hidden) => {
   renameSync(temporary, path);
 });
 
+handle('open-feedback', () => shell.openExternal('https://pdfsee.pages.dev/feedback'));
+
 handle('print-document', owner => {
   const contents = window?.webContents;
   if (contents?.id !== owner) throw new Error('打印窗口已关闭。');

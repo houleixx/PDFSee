@@ -9,6 +9,7 @@ async function invoke(channel, ...args) {
 contextBridge.exposeInMainWorld('desktop', {
   getToolSidebarHidden: () => invoke('get-tool-sidebar-hidden'),
   setToolSidebarHidden: hidden => invoke('set-tool-sidebar-hidden', hidden),
+  openFeedback: () => invoke('open-feedback'),
   printDocument: () => invoke('print-document'),
   pick: (kind, multi) => invoke('pick', kind, multi),
   drop: files => invoke('drop', files.map(file => webUtils.getPathForFile(file)).filter(Boolean)),
