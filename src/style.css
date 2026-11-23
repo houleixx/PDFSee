@@ -128,7 +128,7 @@ select {
 .file-list li small { color: var(--muted); white-space: nowrap; margin-right: 5px; }
 .field { display: grid; gap: 4px; margin: 0 0 11px; }
 .field label { font-weight: 650; }
-#run-tool { margin-top: 5px; }
+.tool-actions { display: flex; align-items: stretch; gap: 8px; margin-top: 5px; }
 dialog { border: 1px solid var(--rule); padding: 21px; border-radius: 12px; color: var(--ink); background: var(--paper); }
 dialog::backdrop { background: #141a205e; }
 dialog h2 { margin: 0 0 10px; font-size: 19px; }
