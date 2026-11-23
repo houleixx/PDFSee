@@ -10,15 +10,20 @@ import './style.css';
 type Kind = 'pdf' | 'image' | 'office';
 type FileInfo = { id: string; kind: Kind; name: string; size: number };
 type Output = { name: string; location: string; count?: number; kind?: 'images' };
+type ToolResult = Output & { message?: string } | { message: string };
+type PdfFormat = 'pages' | 'long' | 'flat' | 'pptx' | 'docx';
 type ToolJob = { mode: string; ids: string[]; spec: string; groupSize: number; rotation: number; paper: string };
 type Bridge = {
+  getToolSidebarHidden(): Promise<boolean>;
+  setToolSidebarHidden(hidden: boolean): Promise<void>;
+  printDocument(): Promise<boolean>;
   pick(kind: Kind, multi: boolean): Promise<FileInfo[]>;
   drop(files: File[]): Promise<FileInfo[]>;
   read(id: string, start: number, end: number): Promise<Uint8Array>;
   release(id: string): Promise<void>;
-  execute(job: ToolJob): Promise<Output | null>;
+  execute(job: ToolJob): Promise<ToolResult | null>;
   saveImage(name: string, data: Uint8Array): Promise<Output | null>;
-  beginImages(id: string, spec: string, count: number): Promise<{ token: string; pages: number[] } | null>;
+  beginImages(id: string, spec: string, count: number, format: PdfFormat): Promise<{ token: string; pages: number[] } | null>;
   writeImage(token: string, data: Uint8Array): Promise<void>;
   finishImages(token: string): Promise<Output>;
   cancelImages(token: string): Promise<void>;
@@ -34,6 +39,30 @@ const input = (id: string) => byId<HTMLInputElement>(id);
 const select = (id: string) => byId<HTMLSelectElement>(id);
 const button = (id: string) => byId<HTMLButtonElement>(id);
 const click = (id: string, action: () => void) => { button(id).onclick = action; };
+const toolSidebar = byId('tool-sidebar');
+const toolSidebarToggle = button('toggle-tool-sidebar');
+
+function setToolSidebarHidden(hidden: boolean) {
+  toolSidebar.hidden = hidden;
+  const label = hidden ? '显示工具栏' : '隐藏工具栏';
+  toolSidebarToggle.title = label;
+  toolSidebarToggle.setAttribute('aria-label', label);
+  toolSidebarToggle.setAttribute('aria-expanded', String(!hidden));
+  toolSidebarToggle.querySelector('i')!.className = hidden ? 'icon icon-panel-left-open' : 'icon icon-panel-left-close';
+}
+
+// Only restore the preference if the user has not already toggled the toolbar.
+let toolSidebarToggled = false;
+void desktop.getToolSidebarHidden().then(hidden => {
+  if (!toolSidebarToggled) setToolSidebarHidden(hidden);
+}).catch(() => {});
+
+click('toggle-tool-sidebar', () => {
+  toolSidebarToggled = true;
+  setToolSidebarHidden(!toolSidebar.hidden);
+  void desktop.setToolSidebarHidden(toolSidebar.hidden).catch(error => status(error.message));
+});
+
 const sizeText = (size: number) => size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`;
 
 const tools = {
@@ -41,13 +70,14 @@ const tools = {
   split: { title: '拆分 PDF', icon: 'scissors', kind: 'pdf', multi: false, description: '按固定页数把一份 PDF 分成多个文件。', hint: '支持指定页码范围', submit: '选择目录并拆分' },
   extract: { title: '提取页面', icon: 'files', kind: 'pdf', multi: false, description: '把选中的页面导出为一份新 PDF。', hint: '选择一份 PDF', submit: '提取并保存' },
   organize: { title: '整理页面', icon: 'layout-grid', kind: 'pdf', multi: false, description: '按指定顺序排列页面，可删除不需要的页或旋转导出的页。', hint: '选择一份 PDF', submit: '保存整理后的 PDF' },
-  raster: { title: 'PDF 转图片', icon: 'images', kind: 'pdf', multi: false, description: '将全部或指定页面导出为 PNG 图片，一页一张。', hint: '选择一份 PDF', submit: '选择目录并导出' },
-  image: { title: '图片转 PDF', icon: 'image', kind: 'image', multi: true, description: '按列表顺序把图片合成一份 PDF，每张图片一页。', hint: 'JPG、JPEG、PNG', submit: '转换并保存' },
+  raster: { title: 'PDF 转换', icon: 'images', kind: 'pdf', multi: false, description: '选择输出格式，转换全部或指定页面。', hint: '选择一份 PDF', submit: '选择目录并导出' },
+  image: { title: '图片转 PDF', icon: 'image-plus', kind: 'image', multi: true, description: '按列表顺序把图片合成一份 PDF，每张图片一页。', hint: 'JPG、JPEG、PNG', submit: '转换并保存' },
   office: { title: '文档转 PDF', icon: 'file-type', kind: 'office', multi: false, description: '通过本机安装的 LibreOffice 将文档导出为 PDF。', hint: 'Word、Excel、PowerPoint、OpenDocument、RTF、TXT', submit: '转换并保存' }
 } as const;
 
 type Mode = 'read' | keyof typeof tools;
 let mode: Mode = 'read';
+let pdfFormat: PdfFormat = 'pages';
 let current: FileInfo | null = null;
 let selections: FileInfo[] = [];
 let output: Output | null = null;
@@ -63,6 +93,7 @@ let outlineLoaded = false;
 let thumbActive: HTMLElement | null = null;
 let searchTimer = 0;
 let exporting = false;
+let printing = false;
 let cancelImageRequested = false;
 let imageRender: PageRender | null = null;
 let imageLoading: ReturnType<typeof getDocument> | null = null;
@@ -95,19 +126,39 @@ function errorStatus(error: unknown) {
   status(error instanceof Error ? error.message : String(error), true);
 }
 
-function success(result: Output | null) {
-  if (!result) return status('已取消保存。');
+let successToastTimer = 0;
+
+function showSuccessToast(label = '处理成功') {
+  const toast = byId('success-toast');
+  byId('success-toast-text').textContent = label;
+  toast.hidden = false;
+  window.clearTimeout(successToastTimer);
+  successToastTimer = window.setTimeout(() => { toast.hidden = true; }, 1600);
+}
+
+function success(result: ToolResult | null) {
+  if (result && 'message' in result && result.message) {
+    if ('location' in result) {
+      status(result.message, false, result);
+      showSuccessToast('下载成功');
+    } else {
+      status(result.message);
+    }
+    return;
+  }
+  if (!result || !('location' in result)) return status('已取消保存。');
   status(result.kind === 'images' ? `已导出 ${result.count} 张 PNG 图片` :
     result.count ? `已导出 ${result.count} 份 PDF` : `已保存 ${result.name}`, false, result);
+  showSuccessToast();
 }
 
 function refreshSection() {
   byId('home').hidden = mode !== 'read' || !!doc;
   byId('reader').hidden = mode !== 'read' || !doc;
   byId('tools').hidden = mode === 'read';
-  byId('section-title').textContent = mode === 'read' ? current?.name ?? '阅读 PDF' : tools[mode].title;
+  byId('section-title').textContent = mode === 'read' ? current?.name ?? '阅读 PDF' : mode === 'raster' ? pdfFormats[pdfFormat].title : tools[mode].title;
   document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach(node => {
-    const active = node.dataset.mode === mode;
+    const active = node.dataset.mode === mode && (mode !== 'raster' || node.dataset.pdfFormat === pdfFormat);
     node.classList.toggle('active', active);
     if (active) node.setAttribute('aria-current', 'page');
     else node.removeAttribute('aria-current');
@@ -121,9 +172,17 @@ function releaseUnused(file: FileInfo) {
   }
 }
 
-function setMode(next: Mode) {
-  if (next === mode) return;
+function setMode(next: Mode, format = pdfFormat) {
+  if (next === mode && (next !== 'raster' || format === pdfFormat)) return;
   if (running) { status('正在处理文件，请稍候。'); return; }
+  if (next === 'raster') {
+    pdfFormat = format;
+    if (mode === 'raster') {
+      refreshSection();
+      refreshPdfFormat();
+      return;
+    }
+  }
   const previous = selections;
   selections = [];
   for (const file of previous) releaseUnused(file);
@@ -145,6 +204,7 @@ function setMode(next: Mode) {
   byId('rotation-options').hidden = mode !== 'organize';
   byId('paper-options').hidden = mode !== 'image';
   (byId('tool-form') as HTMLFormElement).reset();
+  if (mode === 'raster') refreshPdfFormat();
   refreshFiles();
 }
 
@@ -397,24 +457,183 @@ bus.on('updatefindcontrolstate', ({ state, matchesCount }) => {
   else findCount({ matchesCount });
 });
 
-async function renderPng(page: Awaited<ReturnType<NonNullable<typeof doc>['getPage']>>, rotation = page.rotate, batch = false) {
+async function printDocument() {
+  if (printing) return;
+  const source = doc;
+  if (!source || mode !== 'read') {
+    status('请先打开要打印的 PDF。');
+    return;
+  }
+
+  printing = true;
+  const control = button('print-document');
+  control.disabled = true;
+  const container = byId('print-pages');
+  const pageStyles = document.createElement('style');
+  document.head.append(pageStyles);
+  const paperSizes = new Map<string, string>();
+  const urls: string[] = [];
+  const canvas = document.createElement('canvas');
+  const rotation = viewer.pagesRotation;
+  const active = () => doc === source && mode === 'read';
+
+  try {
+    status('正在准备打印…');
+    const permissions = await source.getPermissions();
+    const { PRINT, PRINT_HIGH_QUALITY } = pdfjs.PermissionFlag;
+    if (permissions && !permissions.includes(PRINT) && !permissions.includes(PRINT_HIGH_QUALITY)) {
+      throw new Error('这份 PDF 禁止打印。');
+    }
+
+    const dpi = !permissions || permissions.includes(PRINT_HIGH_QUALITY) ? 160 : 150;
+    const printAnnotationStorage = source.annotationStorage.print;
+    for (let number = 1; number <= source.numPages; number++) {
+      if (!active()) return;
+      status(`正在准备打印 · ${number} / ${source.numPages}`);
+      const page = await source.getPage(number);
+      if (!active()) return;
+      const angle = (page.rotate + rotation) % 360;
+      const paper = page.getViewport({ scale: 1, rotation: angle });
+      const scale = Math.min(dpi / 72, 5000 / Math.max(paper.width, paper.height),
+        Math.sqrt(16000000 / (paper.width * paper.height)));
+      const viewport = page.getViewport({ scale, rotation: angle });
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvas, viewport, intent: 'print', background: '#fff',
+        annotationMode: AnnotationMode.ENABLE_STORAGE, printAnnotationStorage }).promise;
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (!active()) return;
+      if (!blob) throw new Error('无法准备打印页面。');
+
+      const width = `${paper.width.toFixed(3)}pt`;
+      const height = `${paper.height.toFixed(3)}pt`;
+      const size = `${width} ${height}`;
+      let pageName = paperSizes.get(size);
+      if (!pageName) {
+        pageName = `pdfsee-paper-${paperSizes.size}`;
+        paperSizes.set(size, pageName);
+        pageStyles.sheet!.insertRule(`@page ${pageName} { size: ${size}; margin: 0; }`);
+      }
+      const sheet = document.createElement('div');
+      sheet.style.setProperty('page', pageName);
+      sheet.style.setProperty('--paper-width', width);
+      sheet.style.setProperty('--paper-height', height);
+      const image = new Image();
+      const url = URL.createObjectURL(blob);
+      urls.push(url);
+      image.src = url;
+      await image.decode();
+      sheet.append(image);
+      container.append(sheet);
+    }
+
+    if (!active()) return;
+    const sent = await desktop.printDocument();
+    if (active()) {
+      status(sent ? '已提交打印。' : '已取消打印。');
+      if (sent) showSuccessToast('已提交打印');
+    }
+  } catch (error) {
+    if (active()) errorStatus(error);
+  } finally {
+    container.replaceChildren();
+    pageStyles.remove();
+    urls.forEach(url => URL.revokeObjectURL(url));
+    canvas.width = canvas.height = 1;
+    printing = false;
+    control.disabled = false;
+  }
+}
+
+async function canvasPng(canvas: HTMLCanvasElement) {
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('无法生成 PNG。');
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+type PdfPage = Awaited<ReturnType<NonNullable<typeof doc>['getPage']>>;
+
+async function renderPageCanvas(page: PdfPage, view: ReturnType<PdfPage['getViewport']>, canvas: HTMLCanvasElement, batch: boolean) {
+  canvas.width = Math.max(1, Math.ceil(view.width));
+  canvas.height = Math.max(1, Math.ceil(view.height));
+  const rendering = page.render({ canvas, viewport: view, background: '#ffffff' });
+  if (batch) imageRender = rendering;
+  try { await rendering.promise; }
+  finally { if (batch) imageRender = null; }
+}
+
+async function renderPng(page: PdfPage, rotation = page.rotate, batch = false) {
   const initial = page.getViewport({ scale: 1, rotation });
   const scale = Math.min(2, 5000 / Math.max(initial.width, initial.height), Math.sqrt(16000000 / (initial.width * initial.height)));
-  const view = page.getViewport({ scale, rotation });
   const canvas = document.createElement('canvas');
   try {
-    canvas.width = Math.max(1, Math.ceil(view.width));
-    canvas.height = Math.max(1, Math.ceil(view.height));
-    const rendering = page.render({ canvas, viewport: view, background: '#ffffff' });
-    if (batch) imageRender = rendering;
-    await rendering.promise;
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('无法生成 PNG。');
-    return new Uint8Array(await blob.arrayBuffer());
+    await renderPageCanvas(page, page.getViewport({ scale, rotation }), canvas, batch);
+    return await canvasPng(canvas);
   } finally {
-    if (batch) imageRender = null;
     canvas.width = canvas.height = 1;
   }
+}
+
+async function longImage(source: NonNullable<typeof doc>, pages: number[], checkCanceled: () => void, cleanup: boolean) {
+  const sizes = [];
+  let width = 0;
+  let height = 0;
+  for (const index of pages) {
+    checkCanceled();
+    const page = await source.getPage(index + 1);
+    const view = page.getViewport({ scale: 1 });
+    sizes.push(view);
+    width = Math.max(width, view.width);
+    height += view.height;
+    if (cleanup) page.cleanup();
+  }
+  const scale = Math.min(2, 5000 / width, (30000 - pages.length) / height,
+    Math.sqrt(24000000 / (width * height)));
+  if (scale <= 0 || (width * scale < 320 && pages.length > 1)) {
+    throw new Error('所选页面太多，长图会过窄。请缩小页码范围后重试。');
+  }
+  const output = document.createElement('canvas');
+  const temp = document.createElement('canvas');
+  output.width = Math.max(1, Math.ceil(width * scale));
+  output.height = sizes.reduce((sum, view) => sum + Math.ceil(view.height * scale), 0);
+  const context = output.getContext('2d');
+  if (!context) throw new Error('无法创建长图。');
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, output.width, output.height);
+  try {
+    let y = 0;
+    for (const [i, index] of pages.entries()) {
+      checkCanceled();
+      status(`正在拼接 · ${i + 1} / ${pages.length}`);
+      const page = await source.getPage(index + 1);
+      try {
+        checkCanceled();
+        await renderPageCanvas(page, page.getViewport({ scale }), temp, true);
+        context.drawImage(temp, Math.floor((output.width - temp.width) / 2), y);
+        y += temp.height;
+      } finally { if (cleanup) page.cleanup(); }
+    }
+    checkCanceled();
+    return await canvasPng(output);
+  } finally {
+    output.width = output.height = temp.width = temp.height = 1;
+  }
+}
+
+const pdfFormats: Record<PdfFormat, { title: string; icon: string; hint: string; action: string }> = {
+  pages: { title: 'PDF 逐页转图', icon: 'images', hint: '每页一张 PNG，文件名保留原始页码。', action: '选择目录并导出' },
+  long: { title: 'PDF 转长图', icon: 'rectangle-vertical', hint: '将页面按顺序纵向拼接为一张 PNG。', action: '保存长图' },
+  flat: { title: 'PDF 转纯图 PDF', icon: 'file-image', hint: '保留页面尺寸和外观，文字无法搜索或复制。', action: '保存纯图 PDF' },
+  pptx: { title: 'PDF 转 PPT', icon: 'presentation', hint: '每页作为一张图片放入幻灯片，文字和图形不单独编辑。', action: '保存 PPT' },
+  docx: { title: 'PDF 转 Word', icon: 'file-text', hint: '提取 PDF 内已有的文字。图片、表格结构和原排版不保留，扫描件需要 OCR。', action: '保存 Word' }
+};
+
+function refreshPdfFormat() {
+  const format = pdfFormats[pdfFormat];
+  byId('tool-title').textContent = format.title;
+  byId('tool-description').textContent = format.hint;
+  byId('tool-icon').replaceChildren(icon(format.icon));
+  byId('run-label').textContent = format.action;
 }
 
 async function exportImage() {
@@ -471,22 +690,41 @@ async function exportImages() {
     checkCanceled();
     const spec = select('image-range').value === 'all' ? '' : input('page-spec').value;
     if (select('image-range').value === 'custom' && !spec.trim()) throw new Error('请输入要导出的页码，例如 2 或 1-3, 5。');
-    const session = await desktop.beginImages(file.id, spec, source.numPages);
+    const format = pdfFormat;
+    const session = await desktop.beginImages(file.id, spec, source.numPages, format);
     if (!session) return null;
     token = session.token;
-    for (let index = 0; index < session.pages.length; index++) {
+
+    if (format === 'long') {
+      const image = await longImage(source, session.pages, checkCanceled, !!loading);
       checkCanceled();
-      const number = session.pages[index] + 1;
-      status(`正在导出第 ${number} 页 · ${index + 1} / ${session.pages.length}`);
-      const page = await source.getPage(number);
-      try {
+      await desktop.writeImage(token, image);
+    } else {
+      for (const [index, pageIndex] of session.pages.entries()) {
         checkCanceled();
-        const bytes = await renderPng(page, page.rotate, true);
-        checkCanceled();
-        await desktop.writeImage(token, bytes);
-      } finally { if (loading) page.cleanup(); }
+        const number = pageIndex + 1;
+        status(`正在转换第 ${number} 页 · ${index + 1} / ${session.pages.length}`);
+        const page = await source.getPage(number);
+        try {
+          checkCanceled();
+          if (format === 'docx') {
+            const { items } = await page.getTextContent();
+            const text = items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : '') : '')
+              .join('').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trimEnd();
+            checkCanceled();
+            await desktop.writeImage(token, text);
+          } else {
+            const size = page.getViewport({ scale: 1 });
+            const bytes = await renderPng(page, page.rotate, true);
+            checkCanceled();
+            await desktop.writeImage(token, bytes, size.width, size.height);
+          }
+        } finally { if (loading) page.cleanup(); }
+      }
     }
     checkCanceled();
+    button('cancel-images').hidden = true;
+    status('正在保存…');
     const result = await desktop.finishImages(token);
     token = null;
     return result;
@@ -494,7 +732,7 @@ async function exportImages() {
     checkCanceled();
     throw error;
   } finally {
-    try { if (token) await desktop.cancelImages(token); }
+    try { if (token) await desktop.cancelImages(token).catch(() => {}); }
     finally { imageLoading = null; await loading?.destroy(); }
   }
 }
@@ -594,14 +832,14 @@ async function runTool(event: SubmitEvent) {
   const controls = Array.from(byId('tool-form').querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select'));
   controls.forEach(control => { control.disabled = true; });
   refreshFiles();
-  status(`正在处理 · ${tools[mode].title}`);
+  status(`正在处理 · ${mode === 'raster' ? pdfFormats[pdfFormat].title : tools[mode].title}`);
   try {
     success(mode === 'raster' ? await exportImages() : await desktop.execute({
       mode, ids: selections.map(file => file.id), spec: input('page-spec').value,
       groupSize: Number(input('group-size').value), rotation: Number(select('rotation').value), paper: select('paper').value
     }));
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') status('已取消转换，未保存图片。');
+    if (error instanceof DOMException && error.name === 'AbortError') status('已取消转换。');
     else errorStatus(error);
   }
   finally {
@@ -613,7 +851,7 @@ async function runTool(event: SubmitEvent) {
 }
 
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(element => {
-  element.onclick = () => setMode(element.dataset.mode as Mode);
+  element.onclick = () => setMode(element.dataset.mode as Mode, element.dataset.pdfFormat as PdfFormat | undefined);
 });
 document.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach(element => {
   element.onclick = () => {
@@ -654,6 +892,7 @@ click('next', () => viewer.nextPage());
 click('zoom-in', () => viewer.increaseScale());
 click('zoom-out', () => viewer.decreaseScale());
 click('rotate', () => { viewer.pagesRotation = (viewer.pagesRotation + 90) % 360; });
+click('print-document', () => void printDocument());
 click('export-image', () => void exportImage());
 click('find', openSearch);
 click('find-close', closeSearch);
@@ -716,6 +955,7 @@ desktop.onError(errorStatus);
 desktop.onMenu(command => {
   if (command === 'open') void pickPdf();
   if (command === 'close') closeDocument();
+  if (command === 'print') void printDocument();
   if (command === 'find') openSearch();
 });
 void desktop.ready().catch(errorStatus);

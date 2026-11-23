@@ -1,8 +1,12 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell, utilityProcess } = require('electron');
+const { readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
 const { basename, dirname, extname, join, resolve, sep } = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { imagePages, createImageExport } = require('./image-export.cjs');
+const { imagePages, createImageExport, createFormatExport } = require('./image-export.cjs');
+const { extensions: exportExtensions } = require('./pdf-formats.cjs');
+const { findOffice } = require('./office.cjs');
+const { findInstaller, downloadInstaller } = require('./office-download.cjs');
 const { createUpdater } = require('./updates.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'pdfsee', privileges: {
@@ -132,6 +136,37 @@ async function saveAtomically(path, write) {
   }
 }
 
+async function offerOfficeDownload() {
+  const target = window;
+  const { response } = await dialog.showMessageBox(target, {
+    type: 'info', message: '文档转 PDF 需要 LibreOffice',
+    detail: 'PDFSee 可以下载适用于这台电脑的官方安装包。下载后安装 LibreOffice，再回来转换文档。',
+    buttons: ['下载安装包', '稍后'], defaultId: 0, cancelId: 1
+  });
+  if (response !== 0 || target.isDestroyed()) return { message: '安装 LibreOffice 后即可转换文档。' };
+  const fetch = (url, options) => net.fetch(url, options);
+  const arch = process.platform === 'darwin' && app.runningUnderARM64Translation ? 'arm64' : process.arch;
+  target.setProgressBar(2);
+  try {
+    const installer = await findInstaller(fetch, process.platform, arch);
+    if (target.isDestroyed()) return null;
+    const path = await chooseOutput(join(app.getPath('downloads'), installer.name), extname(installer.name).slice(1));
+    if (!path) return { message: '已取消下载。' };
+    let percent = -1;
+    await saveAtomically(path, temporary => downloadInstaller(fetch, installer, temporary, progress => {
+      const next = Math.floor(progress * 100);
+      if (next !== percent && !target.isDestroyed()) {
+        percent = next;
+        target.setProgressBar(progress);
+      }
+    }));
+    outputs.add(path);
+    return { name: basename(path), location: path, message: 'LibreOffice 已下载。请打开安装包，安装后重新转换。' };
+  } finally {
+    if (!target.isDestroyed()) target.setProgressBar(-1);
+  }
+}
+
 async function execute(owner, job) {
   if (busy) throw new Error('正在处理另一个任务，请稍后再试。');
   busy = true;
@@ -146,6 +181,8 @@ async function execute(owner, job) {
     const first = paths[0];
     const stem = basename(first, extname(first));
     const { mode } = job;
+    const office = mode === 'office' ? await findOffice() : null;
+    if (mode === 'office' && !office) return await offerOfficeDownload();
     const spec = typeof job.spec === 'string' ? job.spec.slice(0, 30000) : '';
     const rotation = [0, 90, 180, 270].includes(job.rotation) ? job.rotation : 0;
     const paper = ['original', 'a4', 'letter'].includes(job.paper) ? job.paper : 'original';
@@ -168,13 +205,42 @@ async function execute(owner, job) {
     const path = await chooseOutput(join(dirname(first), `${stem}${suffix}.pdf`));
     if (!path) return null;
     await ensureDifferent(path, paths);
-    await saveAtomically(path, outputPath => runWorker({ mode, paths, spec, rotation, paper, outputPath }));
+    await saveAtomically(path, outputPath => runWorker({ mode, paths, spec, rotation, paper, office, outputPath }));
     outputs.add(path);
     return { name: basename(path), location: path };
   } finally {
     busy = false;
   }
 }
+
+const toolSidebarPreference = () => join(app.getPath('userData'), 'tool-sidebar');
+handle('get-tool-sidebar-hidden', () => {
+  try {
+    return readFileSync(toolSidebarPreference(), 'utf8') === 'hidden';
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return false;
+  }
+});
+handle('set-tool-sidebar-hidden', (_owner, hidden) => {
+  if (typeof hidden !== 'boolean') throw new Error('无效的工具栏状态。');
+  const path = toolSidebarPreference();
+  const temporary = path + '.tmp';
+  writeFileSync(temporary, hidden ? 'hidden' : 'visible');
+  renameSync(temporary, path);
+});
+
+handle('print-document', owner => {
+  const contents = window?.webContents;
+  if (contents?.id !== owner) throw new Error('打印窗口已关闭。');
+  return new Promise((resolve, reject) => {
+    contents.print({ printBackground: true, margins: { marginType: 'none' } }, (success, reason) => {
+      if (success) resolve(true);
+      else if (/cancel/i.test(reason)) resolve(false);
+      else reject(new Error(reason ? `打印失败：${reason}` : '无法打印，请检查系统打印机设置。'));
+    });
+  });
+});
 
 handle('pick', async (owner, kind, multi) => {
   if (!Object.hasOwn(types, kind)) throw new Error('不支持该格式。');
@@ -207,17 +273,33 @@ handle('read', async (owner, id, start, end) => {
   } finally { await fd.close(); }
 });
 handle('execute', execute);
-handle('begin-images', async (owner, id, spec, count) => {
+handle('begin-images', async (owner, id, spec, count, format = 'pages') => {
   if (busy) throw new Error('正在处理另一个任务，请稍后再试。');
   const file = getFile(id, owner, 'pdf');
   const pages = imagePages(spec, count);
   busy = true;
   try {
-    const result = await dialog.showOpenDialog(window, {
-      title: '选择图片导出目录', properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(file.path)
-    });
-    if (result.canceled || !window || window.webContents.id !== owner) { busy = false; return null; }
-    const session = await createImageExport(result.filePaths[0], basename(file.path, extname(file.path)), pages);
+    let session;
+    const stem = basename(file.path, extname(file.path));
+    if (format === 'pages') {
+      const result = await dialog.showOpenDialog(window, {
+        title: '选择图片导出目录', properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(file.path)
+      });
+      if (result.canceled || !window || window.webContents.id !== owner) { busy = false; return null; }
+      session = await createImageExport(result.filePaths[0], stem, pages);
+    } else {
+      if (!Object.hasOwn(exportExtensions, format)) throw new Error('不支持的转换格式。');
+      const extension = exportExtensions[format];
+      const suffix = { long: '-长图', flat: '-纯图', pptx: '', docx: '' }[format];
+      const path = await chooseOutput(join(dirname(file.path), `${stem}${suffix}.${extension}`), extension);
+      if (!path || !window || window.webContents.id !== owner) { busy = false; return null; }
+      await ensureDifferent(path, [file.path]);
+      session = await createFormatExport(path, format, pages.length, (entries, closed) =>
+        saveAtomically(path, async outputPath => {
+          await runWorker({ mode: 'pdf-format', format, pages: entries, outputPath });
+          if (closed()) throw new Error('转换已取消。');
+        }));
+    }
     if (!window || window.webContents.id !== owner) {
       await session.cancel();
       busy = false;
@@ -228,13 +310,25 @@ handle('begin-images', async (owner, id, spec, count) => {
     return { token, pages };
   } catch (error) { busy = false; throw error; }
 });
-handle('write-image', async (owner, token, bytes) => getImageExport(owner, token).append(bytes));
-handle('finish-images', (owner, token) => {
-  const result = getImageExport(owner, token).finish();
-  outputs.add(result.location);
-  imageExport = null;
-  busy = false;
-  return result;
+handle('write-image', async (owner, token, value, width, height) => getImageExport(owner, token).append(value, width, height));
+handle('finish-images', async (owner, token) => {
+  const active = imageExport;
+  const session = getImageExport(owner, token);
+  let finished = false;
+  try {
+    const result = await session.finish();
+    finished = true;
+    outputs.add(result.location);
+    return result;
+  } finally {
+    if (imageExport === active) {
+      if (!finished) await session.cancel().catch(console.error);
+      if (imageExport === active) {
+        imageExport = null;
+        busy = false;
+      }
+    }
+  }
 });
 handle('cancel-images', async (owner, token) => {
   getImageExport(owner, token);
@@ -332,6 +426,7 @@ if (!app.requestSingleInstanceLock()) {
       ] }] : []),
       { label: '文件', submenu: [
         { label: '打开 PDF…', accelerator: 'CmdOrCtrl+O', click: send('open') },
+        { label: '打印…', accelerator: 'CmdOrCtrl+P', click: send('print') },
         { label: '关闭文档', accelerator: 'CmdOrCtrl+Shift+W', click: send('close') },
         { role: 'close', label: '关闭窗口' },
         { type: 'separator' }, { role: 'quit', label: '退出' }

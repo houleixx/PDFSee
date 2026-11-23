@@ -2,11 +2,12 @@ const { writeFile } = require('node:fs/promises');
 const { join } = require('node:path');
 const { loadPdf, copyPages, parsePages, mergeFiles, imagesToPdf } = require('./pdf.cjs');
 const { convertOffice } = require('./office.cjs');
+const { writePdfFormat } = require('./pdf-formats.cjs');
 
-async function run({ mode, paths, paper, spec, rotation, groupSize, directory }) {
+async function run({ mode, paths, paper, spec, rotation, groupSize, directory, office }) {
   if (mode === 'merge') return mergeFiles(paths);
   if (mode === 'image') return imagesToPdf(paths, paper);
-  if (mode === 'office') return convertOffice(paths[0]);
+  if (mode === 'office') return convertOffice(paths[0], office);
 
   const source = await loadPdf(paths[0]);
   const pages = parsePages(spec, source.getPageCount());
@@ -23,6 +24,11 @@ async function run({ mode, paths, paper, spec, rotation, groupSize, directory })
 
 process.parentPort.once('message', async ({ data: job }) => {
   try {
+    if (job.mode === 'pdf-format') {
+      await writePdfFormat(job.format, job.pages, job.outputPath);
+      process.parentPort.postMessage({ value: true });
+      return;
+    }
     const value = await run(job);
     if (job.mode === 'split') process.parentPort.postMessage({ value });
     else {

@@ -1,6 +1,6 @@
 {
   "name": "pdfsee",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Local PDF reader and page tools",
   "main": "desktop/main.cjs",
@@ -27,7 +27,14 @@
     "mac": {
       "target": "dir",
       "icon": "assets/PDFSee.icns",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "CFBundleDevelopmentRegion": "zh-Hans",
+        "CFBundleLocalizations": [
+          "zh-Hans",
+          "en"
+        ]
+      }
     },
     "win": {
       "target": "nsis",
@@ -45,7 +52,9 @@
     ]
   },
   "dependencies": {
-    "pdf-lib": "1.17.1"
+    "docx": "9.5.1",
+    "pdf-lib": "1.17.1",
+    "pptxgenjs": "4.0.1"
   },
   "devDependencies": {
     "electron": "45.4.1",

@@ -28,12 +28,13 @@ async function findOffice() {
     await run('soffice', ['--version'], { timeout: 5000, windowsHide: true });
     return 'soffice';
   } catch {
-    throw new Error('未找到 LibreOffice。请安装 LibreOffice 后重试，或通过 PDFSEE_SOFFICE 指定程序位置。');
+    return null;
   }
 }
 
-async function convertOffice(path) {
-  const office = await findOffice();
+async function convertOffice(path, office) {
+  office ??= await findOffice();
+  if (!office) throw new Error('未找到 LibreOffice。请安装后重试。');
   const dir = await mkdtemp(join(tmpdir(), 'pdfsee-office-'));
   try {
     const source = join(dir, 'source' + extname(path).toLowerCase());
@@ -56,4 +57,4 @@ async function convertOffice(path) {
   }
 }
 
-module.exports = { convertOffice };
+module.exports = { findOffice, convertOffice };

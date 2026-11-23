@@ -7,14 +7,17 @@ async function invoke(channel, ...args) {
 }
 
 contextBridge.exposeInMainWorld('desktop', {
+  getToolSidebarHidden: () => invoke('get-tool-sidebar-hidden'),
+  setToolSidebarHidden: hidden => invoke('set-tool-sidebar-hidden', hidden),
+  printDocument: () => invoke('print-document'),
   pick: (kind, multi) => invoke('pick', kind, multi),
   drop: files => invoke('drop', files.map(file => webUtils.getPathForFile(file)).filter(Boolean)),
   read: (id, start, end) => invoke('read', id, start, end),
   release: id => invoke('release', id),
   execute: job => invoke('execute', job),
   saveImage: (name, bytes) => invoke('save-image', name, bytes),
-  beginImages: (id, spec, count) => invoke('begin-images', id, spec, count),
-  writeImage: (token, bytes) => invoke('write-image', token, bytes),
+  beginImages: (id, spec, count, format) => invoke('begin-images', id, spec, count, format),
+  writeImage: (token, value, width, height) => invoke('write-image', token, value, width, height),
   finishImages: token => invoke('finish-images', token),
   cancelImages: token => invoke('cancel-images', token),
   reveal: path => invoke('reveal', path),

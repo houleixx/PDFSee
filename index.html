@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="shell">
-    <aside class="rail">
+    <aside id="tool-sidebar" class="rail">
       <div class="brand"><img class="brand-mark" src="/images/pdfsee-icon.png" alt="" width="35" height="35"><span>PDFSee</span></div>
       <nav aria-label="工作区">
         <div class="nav-label">工作区</div>
@@ -18,16 +18,25 @@
         <button class="nav-item" data-mode="split"><i class="icon icon-scissors"></i>拆分 PDF</button>
         <button class="nav-item" data-mode="extract"><i class="icon icon-files"></i>提取页面</button>
         <button class="nav-item" data-mode="organize"><i class="icon icon-layout-grid"></i>整理页面</button>
-        <div class="nav-label">转换工具</div>
-        <button class="nav-item" data-mode="raster"><i class="icon icon-images"></i>PDF 转图片</button>
-        <button class="nav-item" data-mode="image"><i class="icon icon-image"></i>图片转 PDF</button>
+        <div class="nav-label">PDF 转换</div>
+        <button class="nav-item" data-mode="raster" data-pdf-format="pages"><i class="icon icon-images"></i>PDF 逐页转图</button>
+        <button class="nav-item" data-mode="raster" data-pdf-format="long"><i class="icon icon-rectangle-vertical"></i>PDF 转长图</button>
+        <button class="nav-item" data-mode="raster" data-pdf-format="flat"><i class="icon icon-file-image"></i>PDF 转纯图 PDF</button>
+        <button class="nav-item" data-mode="raster" data-pdf-format="pptx"><i class="icon icon-presentation"></i>PDF 转 PPT</button>
+        <button class="nav-item" data-mode="raster" data-pdf-format="docx"><i class="icon icon-file-text"></i>PDF 转 Word</button>
+        <div class="nav-label">生成 PDF</div>
+        <button class="nav-item" data-mode="image"><i class="icon icon-image-plus"></i>图片转 PDF</button>
         <button class="nav-item" data-mode="office"><i class="icon icon-file-type"></i>文档转 PDF</button>
       </nav>
-      <div class="local"><span></span> 文件在本机处理</div>
+      <div class="local">文件在本机处理</div>
     </aside>
 
     <main class="main">
-      <header class="masthead"><div id="section-title">阅读 PDF</div><button id="open-file" class="button secondary"><i class="icon icon-folder-open"></i>打开 PDF</button></header>
+      <header class="masthead">
+        <button id="toggle-tool-sidebar" class="square" type="button" aria-controls="tool-sidebar" aria-expanded="true" aria-label="隐藏工具栏" title="隐藏工具栏"><i class="icon icon-panel-left-close" aria-hidden="true"></i></button>
+        <div id="section-title">阅读 PDF</div>
+        <button id="open-file" class="button secondary"><i class="icon icon-folder-open"></i>打开 PDF</button>
+      </header>
       <section id="home" class="home" aria-label="打开 PDF">
         <div class="welcome">
           <img class="paper-art" src="/images/pdfsee-icon.png" alt="" width="106" height="104">
@@ -39,7 +48,7 @@
         <div class="quick"><h2>常用工具</h2><div class="quick-list">
           <button data-mode="merge"><i class="icon icon-layers"></i><span>合并 PDF</span><i class="icon icon-arrow-up-right"></i></button>
           <button data-mode="split"><i class="icon icon-scissors"></i><span>拆分 PDF</span><i class="icon icon-arrow-up-right"></i></button>
-          <button data-mode="image"><i class="icon icon-image"></i><span>图片转 PDF</span><i class="icon icon-arrow-up-right"></i></button>
+          <button data-mode="image"><i class="icon icon-image-plus"></i><span>图片转 PDF</span><i class="icon icon-arrow-up-right"></i></button>
         </div></div>
       </section>
 
@@ -64,6 +73,7 @@
           <span class="toolbar-spacer"></span>
           <button id="rotate" class="square" title="旋转视图" aria-label="旋转视图"><i class="icon icon-rotate-cw"></i></button>
           <button id="find" class="square" title="查找" aria-label="查找"><i class="icon icon-search"></i></button>
+          <button id="print-document" class="square" title="打印 PDF" aria-label="打印 PDF"><i class="icon icon-printer" aria-hidden="true"></i></button>
           <button id="export-image" class="square" title="当前页导出 PNG" aria-label="当前页导出 PNG"><i class="icon icon-download"></i></button>
           <button id="close-file" class="square" title="关闭文档" aria-label="关闭文档"><i class="icon icon-x"></i></button>
         </div>
@@ -95,7 +105,6 @@
             <div id="image-range-options" class="field" hidden>
               <label for="image-range">导出页面</label>
               <select id="image-range"><option value="all">全部页面</option><option value="custom">指定页码</option></select>
-              <small>每页保存为一张 PNG 图片，文件名保留原页码。</small>
             </div>
             <div id="page-options" class="field" hidden>
               <label id="page-spec-label" for="page-spec">页码范围或新顺序</label>
@@ -123,6 +132,11 @@
       <footer class="status" role="status"><span id="status-text">就绪</span><button id="reveal" hidden>在文件夹中显示 <i class="icon icon-arrow-up-right"></i></button></footer>
     </main>
   </div>
+  <div id="success-toast" class="success-toast" aria-hidden="true" hidden>
+    <i class="icon icon-circle-check"></i>
+    <span id="success-toast-text"></span>
+  </div>
+  <div id="print-pages" aria-hidden="true"></div>
   <dialog id="password-dialog">
     <form method="dialog">
       <h2 id="password-title">输入 PDF 密码</h2>
