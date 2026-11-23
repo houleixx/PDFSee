@@ -71,12 +71,17 @@
             <option value="3">300%</option><option value="4">400%</option>
           </select>
           <button id="zoom-in" class="square" title="放大" aria-label="放大"><i class="icon icon-plus"></i></button>
-          <span class="toolbar-spacer"></span>
-          <button id="rotate" class="square" title="旋转视图" aria-label="旋转视图"><i class="icon icon-rotate-cw"></i></button>
-          <button id="find" class="square" title="查找" aria-label="查找"><i class="icon icon-search"></i></button>
-          <button id="print-document" class="square" title="打印 PDF" aria-label="打印 PDF"><i class="icon icon-printer" aria-hidden="true"></i></button>
-          <button id="export-image" class="square" title="当前页导出 PNG" aria-label="当前页导出 PNG"><i class="icon icon-download"></i></button>
-          <button id="close-file" class="square" title="关闭文档" aria-label="关闭文档"><i class="icon icon-x"></i></button>
+          <div class="page-edit-actions">
+            <button id="undo-page-edit" class="square" title="撤销页面编辑" aria-label="撤销页面编辑" hidden><i class="icon icon-undo-2" aria-hidden="true"></i></button>
+            <button id="save-page-edit" class="square" title="另存编辑后的 PDF" aria-label="另存编辑后的 PDF" hidden><i class="icon icon-save" aria-hidden="true"></i></button>
+          </div>
+          <div class="reader-actions">
+            <button id="rotate" class="square" title="旋转视图" aria-label="旋转视图"><i class="icon icon-rotate-cw"></i></button>
+            <button id="find" class="square" title="查找" aria-label="查找"><i class="icon icon-search"></i></button>
+            <button id="print-document" class="square" title="打印 PDF" aria-label="打印 PDF"><i class="icon icon-printer" aria-hidden="true"></i></button>
+            <button id="export-image" class="square" title="当前页导出 PNG" aria-label="当前页导出 PNG"><i class="icon icon-download"></i></button>
+            <button id="close-file" class="square" title="关闭文档" aria-label="关闭文档"><i class="icon icon-x"></i></button>
+          </div>
         </div>
         <div id="find-bar" class="find-bar" hidden>
           <input id="search" type="search" placeholder="在 PDF 中查找" aria-label="查找文字">
@@ -90,7 +95,7 @@
             <div class="sidebar-tabs"><button data-panel="thumbnails" class="active">页面</button><button data-panel="outline">目录</button></div>
             <div id="thumbnails" class="side-content"></div><div id="outline" class="side-content" hidden></div>
           </aside>
-          <div class="viewport"><div id="viewer-container" tabindex="0"><div id="viewer" class="pdfViewer"></div></div></div>
+          <div class="viewport"><div id="viewer-container" class="viewer-scroll" tabindex="0"><div id="viewer" class="pdfViewer"></div></div></div>
         </div>
       </section>
 

@@ -50,6 +50,41 @@ async function copyPages(source, indices, rotation = 0) {
   return output.save();
 }
 
+async function editPages(paths, { action, page, gap }) {
+  const source = await loadPdf(paths[0]);
+  const indices = source.getPageIndices();
+  if (action !== 'insert' && (!Number.isInteger(page) || page < 0 || page >= indices.length)) {
+    throw new Error('要编辑的页面不存在。');
+  }
+  if (action !== 'delete' && (!Number.isInteger(gap) || gap < 0 || gap > indices.length)) {
+    throw new Error('插入位置无效。');
+  }
+  if (action === 'delete') {
+    if (indices.length === 1) throw new Error('文档至少需要保留一页。');
+    indices.splice(page, 1);
+    return copyPages(source, indices);
+  }
+  if (action === 'move') {
+    indices.splice(page, 1);
+    indices.splice(gap > page ? gap - 1 : gap, 0, page);
+    return copyPages(source, indices);
+  }
+  const { PDFDocument } = require('pdf-lib');
+  const output = await PDFDocument.create();
+  async function append(document, pages) {
+    for (const copied of await output.copyPages(document, pages)) output.addPage(copied);
+  }
+  await append(source, indices.slice(0, gap));
+  for (const path of paths.slice(1)) {
+    const attachment = await loadPdf(path);
+    const pages = attachment.getPageIndices();
+    if (!pages.length) throw new Error('插入的 PDF 没有可用页面。');
+    await append(attachment, pages);
+  }
+  await append(source, indices.slice(gap));
+  return output.save();
+}
+
 async function mergeFiles(paths) {
   const { PDFDocument } = require('pdf-lib');
   const output = await PDFDocument.create();
@@ -80,4 +115,4 @@ async function imagesToPdf(paths, paper) {
   return output.save();
 }
 
-module.exports = { parsePages, loadPdf, copyPages, mergeFiles, imagesToPdf };
+module.exports = { parsePages, loadPdf, copyPages, mergeFiles, imagesToPdf, editPages };

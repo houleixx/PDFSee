@@ -1,6 +1,6 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, screen, shell, utilityProcess } = require('electron');
 const { readFileSync, renameSync, writeFileSync } = require('node:fs');
-const { mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
+const { copyFile, mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
 const { basename, dirname, extname, join, resolve, sep } = require('node:path');
 const { execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
@@ -95,6 +95,13 @@ async function register(path, owner) {
   const id = randomUUID();
   registered.set(id, { path, owner, kind, size: info.size });
   return { id, kind, size: info.size, name: basename(path) };
+}
+
+async function releaseFile(owner, id) {
+  const file = registered.get(id);
+  if (file?.owner !== owner) return;
+  registered.delete(id);
+  if (file.temporary) await rm(file.temporary, { recursive: true, force: true });
 }
 
 function getFile(id, owner, kind) {
@@ -222,8 +229,9 @@ async function execute(owner, job) {
     }
     if (job.mode === 'merge' && job.ids.length < 2) throw new Error('请至少添加两份 PDF。');
     if (!['merge', 'image'].includes(job.mode) && job.ids.length !== 1) throw new Error('请选择一份文件。');
-    const paths = job.ids.map(id => getFile(id, owner, kinds[job.mode]).path);
-    const first = paths[0];
+    const files = job.ids.map(id => getFile(id, owner, kinds[job.mode]));
+    const paths = files.map(file => file.path);
+    const first = files[0].sources?.[0] ?? paths[0];
     const stem = basename(first, extname(first));
     const { mode } = job;
     const office = mode === 'office' ? await findOffice() : null;
@@ -249,7 +257,7 @@ async function execute(owner, job) {
     const suffix = { merge: '-合并', extract: '-提取', organize: '-整理', image: '-图片', office: '' }[mode];
     const path = await chooseOutput(join(dirname(first), `${stem}${suffix}.pdf`));
     if (!path) return null;
-    await ensureDifferent(path, paths);
+    await ensureDifferent(path, files.flatMap(file => file.sources ?? [file.path]));
     await saveAtomically(path, outputPath => runWorker({ mode, paths, spec, rotation, paper, office, outputPath }));
     outputs.add(path);
     return { name: basename(path), location: path };
@@ -301,7 +309,50 @@ handle('drop', async (owner, paths) => {
   if (!supported.length) throw new Error('拖入的文件格式不受支持。');
   return Promise.all(supported.map(path => register(path, owner)));
 });
-handle('release', (owner, id) => { if (registered.get(id)?.owner === owner) registered.delete(id); });
+handle('release', releaseFile);
+handle('page-menu', (owner, id, canDelete) => {
+  getFile(id, owner, 'pdf');
+  return new Promise(resolve => {
+    const menu = Menu.buildFromTemplate([
+      { label: '在此页前插入 PDF…', click: () => resolve('before') },
+      { label: '在此页后插入 PDF…', click: () => resolve('after') },
+      { type: 'separator' },
+      { label: '删除此页', enabled: canDelete === true, click: () => resolve('delete') }
+    ]);
+    menu.popup({ window, callback: () => resolve(null) });
+  });
+});
+handle('edit-pages', async (owner, id, edit) => {
+  const source = getFile(id, owner, 'pdf');
+  const { action, ids } = edit ?? {};
+  if (!['insert', 'move', 'delete'].includes(action) || !Array.isArray(ids) || ids.length > 300 ||
+      (action === 'insert' ? !ids.length : ids.length)) throw new Error('页面操作无效。');
+  const files = [source, ...ids.map(id => getFile(id, owner, 'pdf'))];
+  const sources = [...new Set(files.flatMap(file => file.sources ?? [file.path]))];
+  const temporary = await mkdtemp(join(app.getPath('temp'), 'pdfsee-pages-'));
+  try {
+    const outputPath = join(temporary, basename(sources[0]));
+    await runWorker({ mode: 'edit-pages', paths: files.map(file => file.path), edit, outputPath });
+    if (window?.webContents.id !== owner) throw new Error('文档窗口已关闭。');
+    const info = await register(outputPath, owner);
+    Object.assign(getFile(info.id, owner, 'pdf'), { temporary, sources });
+    return info;
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true });
+    throw error;
+  }
+});
+handle('save-edited-pdf', async (owner, id) => {
+  const file = getFile(id, owner, 'pdf');
+  if (!file.sources) throw new Error('没有页面改动可导出。');
+  const source = file.sources[0];
+  const path = await chooseOutput(join(dirname(source), `${basename(source, extname(source))}-整理.pdf`));
+  if (!path) return null;
+  await ensureDifferent(path, file.sources);
+  await saveAtomically(path, temporary => copyFile(file.path, temporary));
+  outputs.add(path);
+  return { name: basename(path), location: path };
+});
 handle('read', async (owner, id, start, end) => {
   const file = getFile(id, owner, 'pdf');
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 ||
@@ -329,7 +380,7 @@ handle('begin-images', async (owner, id, spec, count, format = 'pages') => {
     const stem = basename(file.path, extname(file.path));
     if (format === 'pages') {
       const result = await dialog.showOpenDialog(window, {
-        title: '选择图片导出目录', properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(file.path)
+        title: '选择图片导出目录', properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(file.sources?.[0] ?? file.path)
       });
       if (result.canceled || !window || window.webContents.id !== owner) { busy = false; return null; }
       session = await createImageExport(result.filePaths[0], stem, pages);
@@ -337,9 +388,9 @@ handle('begin-images', async (owner, id, spec, count, format = 'pages') => {
       if (!Object.hasOwn(exportExtensions, format)) throw new Error('不支持的转换格式。');
       const extension = exportExtensions[format];
       const suffix = { long: '-长图', flat: '-纯图', pptx: '', docx: '' }[format];
-      const path = await chooseOutput(join(dirname(file.path), `${stem}${suffix}.${extension}`), extension);
+      const path = await chooseOutput(join(dirname(file.sources?.[0] ?? file.path), `${stem}${suffix}.${extension}`), extension);
       if (!path || !window || window.webContents.id !== owner) { busy = false; return null; }
-      await ensureDifferent(path, [file.path]);
+      await ensureDifferent(path, file.sources ?? [file.path]);
       session = await createFormatExport(path, format, pages.length, (entries, closed) =>
         saveAtomically(path, async outputPath => {
           await runWorker({ mode: 'pdf-format', format, pages: entries, outputPath });
@@ -471,6 +522,13 @@ function createWindow() {
     finishUpdatePrompt(owner);
     void cancelImages().catch(() => {});
   });
+  window.webContents.on('will-prevent-unload', event => {
+    const choice = dialog.showMessageBoxSync(window, {
+      type: 'question', message: '页面改动尚未另存。要放弃改动吗？',
+      buttons: ['继续编辑', '放弃改动'], defaultId: 0, cancelId: 0
+    });
+    if (choice === 1) event.preventDefault();
+  });
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   window.webContents.session.setPermissionCheckHandler(() => false);
@@ -479,7 +537,7 @@ function createWindow() {
     finishUpdatePrompt(owner);
     void cancelImages().catch(() => {});
     ready.delete(owner);
-    for (const [id, file] of registered) if (file.owner === owner) registered.delete(id);
+    for (const id of registered.keys()) void releaseFile(owner, id).catch(() => {});
     window = null;
   });
 }

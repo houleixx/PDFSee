@@ -1,10 +1,11 @@
 const { writeFile } = require('node:fs/promises');
 const { join } = require('node:path');
-const { loadPdf, copyPages, parsePages, mergeFiles, imagesToPdf } = require('./pdf.cjs');
+const { loadPdf, copyPages, parsePages, mergeFiles, imagesToPdf, editPages } = require('./pdf.cjs');
 const { convertOffice } = require('./office.cjs');
 const { writePdfFormat } = require('./pdf-formats.cjs');
 
-async function run({ mode, paths, paper, spec, rotation, groupSize, directory, office }) {
+async function run({ mode, paths, paper, spec, rotation, groupSize, directory, office, edit }) {
+  if (mode === 'edit-pages') return editPages(paths, edit);
   if (mode === 'merge') return mergeFiles(paths);
   if (mode === 'image') return imagesToPdf(paths, paper);
   if (mode === 'office') return convertOffice(paths[0], office);

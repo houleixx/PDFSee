@@ -14,6 +14,7 @@ type Output = { name: string; location: string; count?: number; kind?: 'images' 
 type ToolResult = Output & { message?: string } | { message: string };
 type PdfFormat = 'pages' | 'long' | 'flat' | 'pptx' | 'docx';
 type ToolJob = { mode: string; ids: string[]; spec: string; groupSize: number; rotation: number; paper: string };
+type PageEdit = { action: 'delete' | 'move' | 'insert'; page?: number; gap?: number };
 type UpdateProgress = { version: string; phase: 'download' | 'install'; percent: number | null };
 type UpdatePrompt = {
   id: string;
@@ -34,10 +35,13 @@ type Bridge = {
   drop(files: File[]): Promise<FileInfo[]>;
   read(id: string, start: number, end: number): Promise<Uint8Array>;
   release(id: string): Promise<void>;
+  pageMenu(id: string, canDelete: boolean): Promise<'before' | 'after' | 'delete' | null>;
+  editPages(id: string, edit: PageEdit & { ids: string[] }): Promise<FileInfo>;
+  saveEditedPdf(id: string): Promise<Output | null>;
   execute(job: ToolJob): Promise<ToolResult | null>;
   saveImage(name: string, data: Uint8Array): Promise<Output | null>;
   beginImages(id: string, spec: string, count: number, format: PdfFormat): Promise<{ token: string; pages: number[] } | null>;
-  writeImage(token: string, data: Uint8Array): Promise<void>;
+  writeImage(token: string, data: Uint8Array | string, width?: number, height?: number): Promise<void>;
   finishImages(token: string): Promise<Output>;
   cancelImages(token: string): Promise<void>;
   reveal(path: string): Promise<void>;
@@ -102,6 +106,13 @@ const thumbnailTasks = new Map<HTMLCanvasElement, { cancel: () => void }>();
 const drawnThumbnails = new WeakSet<HTMLCanvasElement>();
 let outlineLoaded = false;
 let thumbActive: HTMLElement | null = null;
+const pageHistory: { file: FileInfo; page: number }[] = [];
+let savedPageVersion: string | null = null;
+let initialPage = 1;
+let previewView: { page: number; scale: string; rotation: number; scrollLeft: number; offset: number; thumbnailScroll: number } | null = null;
+let removePreviewSnapshot: (() => void) | null = null;
+let draggedPage: number | null = null;
+const thumbnails = byId('thumbnails');
 let searchTimer = 0;
 let exporting = false;
 let printing = false;
@@ -185,8 +196,34 @@ function refreshSection() {
   if (mode !== 'read') button('use-current').hidden = !doc || tools[mode].kind !== 'pdf';
 }
 
+function refreshPageEditing() {
+  button('undo-page-edit').hidden = !pageHistory.length;
+  button('save-page-edit').hidden = !pageHistory.length;
+}
+
+function resetPageEditing() {
+  for (const entry of pageHistory.splice(0)) releaseUnused(entry.file);
+  savedPageVersion = null;
+  refreshPageEditing();
+}
+
+function hasUnsavedPageEdits() {
+  return pageHistory.length > 0 && current?.id !== savedPageVersion;
+}
+
+function confirmDiscardEdits() {
+  return !hasUnsavedPageEdits() || window.confirm('页面改动尚未另存。要放弃改动吗？');
+}
+
+window.addEventListener('beforeunload', event => {
+  if (!hasUnsavedPageEdits()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
 function releaseUnused(file: FileInfo) {
-  if (file.id !== current?.id && !selections.some(item => item.id === file.id)) {
+  if (file.id !== current?.id && !selections.some(item => item.id === file.id) &&
+      !pageHistory.some(entry => entry.file.id === file.id)) {
     void desktop.release(file.id).catch(() => {});
   }
 }
@@ -227,17 +264,24 @@ function setMode(next: Mode, format = pdfFormat) {
   refreshFiles();
 }
 
-function clearReader() {
+function clearReader(preserveSearch = false) {
   thumbnailObserver?.disconnect();
   thumbnailObserver = null;
   for (const render of thumbnailTasks.values()) render.cancel();
   thumbnailTasks.clear();
   thumbActive = null;
+  draggedPage = null;
+  clearPageDrop();
   byId('thumbnails').replaceChildren();
   byId('outline').replaceChildren();
   outlineLoaded = false;
-  input('search').value = '';
-  closeSearch();
+  if (preserveSearch) {
+    clearTimeout(searchTimer);
+    byId('matches').textContent = '';
+  } else {
+    input('search').value = '';
+    closeSearch();
+  }
   const dialog = byId<HTMLDialogElement>('password-dialog');
   if (dialog.open) dialog.close('cancel');
   pageOcr?.reset();
@@ -252,17 +296,69 @@ function clearReader() {
   if (previous) releaseUnused(previous);
 }
 
-async function openDocument(file: FileInfo) {
+function holdPreviewUntilRendered() {
+  const body = viewer.container.closest<HTMLElement>('.reading-body')!;
+  const snapshot = body.cloneNode(true) as HTMLElement;
+  snapshot.classList.add('preview-snapshot');
+  snapshot.inert = true;
+  snapshot.setAttribute('aria-hidden', 'true');
+  snapshot.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
+  // Keep the currently drawn PDF and thumbnail canvases visible while the new preview renders.
+  const originalCanvases = body.querySelectorAll('canvas');
+  snapshot.querySelectorAll('canvas').forEach((canvas, index) => {
+    const original = originalCanvases[index];
+    if (original.width > 1 && original.height > 1) canvas.getContext('2d')?.drawImage(original, 0, 0);
+  });
+  const scrollPositions = Array.from(body.querySelectorAll('.viewer-scroll, .side-content'), element =>
+    [element.scrollLeft, element.scrollTop] as const);
+  body.append(snapshot);
+  snapshot.querySelectorAll('.viewer-scroll, .side-content').forEach((element, index) => {
+    [element.scrollLeft, element.scrollTop] = scrollPositions[index];
+  });
+  let timeout = 0;
+  const remove = () => {
+    window.clearTimeout(timeout);
+    bus.off('pagerendered', finish);
+    snapshot.remove();
+    removePreviewSnapshot = null;
+  };
+  const finish = ({ pageNumber, cssTransform }: { pageNumber: number; cssTransform: boolean }) => {
+    if (pageNumber === viewer.currentPageNumber && !cssTransform) remove();
+  };
+  removePreviewSnapshot = remove;
+  bus.on('pagerendered', finish);
+  timeout = window.setTimeout(remove, 4000);
+}
+
+async function openDocument(file: FileInfo, page?: number) {
   if (running) {
     releaseUnused(file);
     return status('正在处理文件，请稍候。');
   }
+  if (page === undefined) {
+    if (!confirmDiscardEdits()) { releaseUnused(file); return; }
+    resetPageEditing();
+  }
+  removePreviewSnapshot?.();
+  const preserveView = page !== undefined && doc && mode === 'read';
+  previewView = preserveView ? {
+    page: viewer.currentPageNumber,
+    scale: viewer.currentScaleValue,
+    rotation: viewer.pagesRotation,
+    scrollLeft: viewer.container.scrollLeft,
+    offset: viewer.container.scrollTop - (viewer.getPageView(viewer.currentPageNumber - 1)?.div.offsetTop ?? 0),
+    thumbnailScroll: thumbnails.scrollTop
+  } : null;
+  if (preserveView) holdPreviewUntilRendered();
   const version = ++loadVersion;
-  clearReader();
+  clearReader(!!preserveView);
+  initialPage = page ?? 1;
   current = file;
   setMode('read');
-  refreshSection();
-  status(`正在打开 ${file.name}…`);
+  if (!preserveView) {
+    refreshSection();
+    status(`正在打开 ${file.name}…`);
+  }
   try {
     const transport = new class extends PDFDataRangeTransport {
       requestDataRange(start: number, end: number) {
@@ -271,6 +367,7 @@ async function openDocument(file: FileInfo) {
         }).catch(error => {
           if (version !== loadVersion) return;
           ++loadVersion;
+          removePreviewSnapshot?.();
           clearReader();
           refreshSection();
           errorStatus(error);
@@ -313,6 +410,7 @@ async function openDocument(file: FileInfo) {
     status(`${file.name} · ${loaded.numPages} 页 · ${sizeText(file.size)}`);
   } catch (error) {
     if (version !== loadVersion) return;
+    removePreviewSnapshot?.();
     clearReader();
     refreshSection();
     status(error instanceof Error && error.name === 'InvalidPDFException'
@@ -321,8 +419,10 @@ async function openDocument(file: FileInfo) {
 }
 
 function closeDocument() {
-  if (running || !current) return;
+  if (running || !current || !confirmDiscardEdits()) return;
+  resetPageEditing();
   ++loadVersion;
+  removePreviewSnapshot?.();
   clearReader();
   refreshSection();
   status('已关闭文档。');
@@ -377,6 +477,18 @@ function makeThumbnails(documentToRender: NonNullable<typeof doc>) {
     thumb.className = 'thumb';
     thumb.setAttribute('aria-label', `第 ${number} 页`);
     thumb.onclick = () => { viewer.currentPageNumber = number; };
+    thumb.draggable = true;
+    thumb.ondragstart = event => {
+      if (running || !event.dataTransfer) { event.preventDefault(); return; }
+      draggedPage = number - 1;
+      event.dataTransfer.setData('application/x-pdfsee-page', String(number));
+      event.dataTransfer.effectAllowed = 'move';
+    };
+    thumb.ondragend = () => { draggedPage = null; clearPageDrop(); };
+    thumb.oncontextmenu = event => {
+      event.preventDefault();
+      void showPageMenu(number - 1).catch(errorStatus);
+    };
     const canvas = document.createElement('canvas');
     canvas.width = 1;
     canvas.height = 1;
@@ -467,7 +579,23 @@ function findCount({ matchesCount }: { matchesCount?: { current: number; total: 
     ? '' : matchesCount.total ? `${matchesCount.current} / ${matchesCount.total}` : '无匹配';
 }
 
-bus.on('pagesinit', () => { viewer.currentScaleValue = 'auto'; updatePage(1); });
+bus.on('pagesinit', () => {
+  const view = previewView;
+  previewView = null;
+  if (view) viewer.pagesRotation = view.rotation;
+  viewer.currentScaleValue = view?.scale || 'auto';
+  if (doc) viewer.currentPageNumber = Math.min(initialPage, doc.numPages);
+  if (view) {
+    viewer.container.scrollLeft = view.scrollLeft;
+    const page = viewer.getPageView(viewer.currentPageNumber - 1);
+    if (page && view.page === viewer.currentPageNumber) {
+      viewer.container.scrollTop = page.div.offsetTop + Math.max(0, Math.min(view.offset, page.div.offsetHeight - 1));
+    }
+    thumbnails.scrollTop = view.thumbnailScroll;
+    if (!byId('find-bar').hidden && input('search').value) find();
+  }
+  updatePage(viewer.currentPageNumber);
+});
 bus.on('pagechanging', ({ pageNumber }) => updatePage(pageNumber));
 bus.on('scalechanging', ({ scale, presetValue }) => {
   const zoom = select('zoom');
@@ -950,6 +1078,119 @@ input('number').onchange = () => {
 input('number').onkeydown = event => { if (event.key === 'Enter') input('number').blur(); };
 select('zoom').onchange = () => { viewer.currentScaleValue = select('zoom').value; };
 byId('open-key').textContent = navigator.platform.startsWith('Mac') ? '⌘ O' : 'Ctrl+O';
+
+async function editReaderPages(edit: PageEdit, targetPage: number, getFiles?: () => Promise<FileInfo[]>) {
+  if (running || exporting || printing || !current || !doc || removePreviewSnapshot) return;
+  const previous = { file: current, page: viewer.currentPageNumber };
+  let files: FileInfo[] = [];
+  let preview: FileInfo | undefined;
+  running = true;
+  try {
+    if (getFiles) {
+      files = await getFiles();
+      if (!files.length) return;
+      if (files.some(file => file.kind !== 'pdf')) throw new Error('请仅拖入 PDF 文件。');
+    }
+    status('正在更新页面…');
+    preview = await desktop.editPages(previous.file.id, { ...edit, ids: files.map(file => file.id) });
+    pageHistory.push(previous);
+  } catch (error) {
+    errorStatus(error);
+  } finally {
+    files.forEach(releaseUnused);
+    running = false;
+  }
+  if (!preview) return;
+  const previewVersion = loadVersion + 1;
+  await openDocument(preview, targetPage);
+  if (loadVersion !== previewVersion) return;
+  if (!doc) {
+    pageHistory.pop();
+    await openDocument(previous.file, previous.page);
+  }
+  refreshPageEditing();
+}
+
+async function showPageMenu(page: number) {
+  if (running || !current || !doc) return;
+  const id = current.id;
+  const action = await desktop.pageMenu(id, doc.numPages > 1);
+  if (!action || current?.id !== id) return;
+  if (action === 'delete') {
+    await editReaderPages({ action, page }, page + 1);
+    return;
+  }
+  const gap = action === 'before' ? page : page + 1;
+  await editReaderPages({ action: 'insert', gap }, gap + 1, () => desktop.pick('pdf', true));
+}
+
+click('undo-page-edit', () => {
+  if (running || exporting || printing || !doc || removePreviewSnapshot) return;
+  const previous = pageHistory.pop();
+  if (previous) void openDocument(previous.file, previous.page).then(refreshPageEditing);
+});
+click('save-page-edit', () => {
+  if (running || exporting || printing || !current || !doc || removePreviewSnapshot || !pageHistory.length) return;
+  const id = current.id;
+  running = true;
+  void desktop.saveEditedPdf(id).then(result => {
+    if (result) savedPageVersion = id;
+    success(result);
+  }).catch(errorStatus).finally(() => { running = false; });
+});
+
+function clearPageDrop() {
+  thumbnails.querySelector('.drop-before, .drop-after')?.classList.remove('drop-before', 'drop-after');
+}
+
+function pageDropPosition(event: DragEvent) {
+  const target = event.target;
+  if (!(target instanceof Element) || !thumbnails.contains(target)) return null;
+  const thumb = target.closest<HTMLElement>('.thumb');
+  const anchor = thumb ?? Array.from(thumbnails.children).find(element => event.clientY < element.getBoundingClientRect().bottom)
+    ?? thumbnails.lastElementChild;
+  if (!anchor) return null;
+  const rect = anchor.getBoundingClientRect();
+  const after = event.clientY >= (rect.top + rect.bottom) / 2;
+  return { anchor, after, gap: Number(anchor.id.slice('thumb-'.length)) - (after ? 0 : 1) };
+}
+
+thumbnails.addEventListener('dragover', event => {
+  const external = event.dataTransfer?.types.includes('Files');
+  if ((!external && draggedPage === null) || !event.dataTransfer) return;
+  event.preventDefault();
+  event.stopPropagation();
+  document.body.classList.remove('drop-active');
+  clearPageDrop();
+  event.dataTransfer.dropEffect = running ? 'none' : external ? 'copy' : 'move';
+  if (running) return;
+  const bounds = thumbnails.getBoundingClientRect();
+  if (event.clientY < bounds.top + 24) thumbnails.scrollTop -= 12;
+  else if (event.clientY > bounds.bottom - 24) thumbnails.scrollTop += 12;
+  const position = pageDropPosition(event);
+  position?.anchor.classList.add(position.after ? 'drop-after' : 'drop-before');
+});
+
+thumbnails.addEventListener('dragleave', event => {
+  if (!(event.relatedTarget instanceof Node) || !thumbnails.contains(event.relatedTarget)) clearPageDrop();
+});
+
+thumbnails.addEventListener('drop', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  clearPageDrop();
+  const position = pageDropPosition(event);
+  if (!position) return;
+  const { gap } = position;
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (files.length) {
+    void editReaderPages({ action: 'insert', gap }, gap + 1, () => desktop.drop(files));
+  } else if (draggedPage !== null && gap !== draggedPage && gap !== draggedPage + 1) {
+    const page = draggedPage;
+    void editReaderPages({ action: 'move', page, gap }, gap > page ? gap : gap + 1);
+  }
+  draggedPage = null;
+});
 
 document.addEventListener('dragover', event => {
   if (!event.dataTransfer?.types.includes('Files')) return;
