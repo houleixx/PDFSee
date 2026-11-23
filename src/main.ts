@@ -27,7 +27,6 @@ type UpdatePrompt = {
 type Bridge = {
   canRecognizePages: boolean;
   recognizePage(bytes: Uint8Array): Promise<RecognizedLine[]>;
-  getToolSidebarHidden(): Promise<boolean>;
   setToolSidebarHidden(hidden: boolean): Promise<void>;
   openFeedback(): Promise<void>;
   printDocument(): Promise<boolean>;
@@ -68,14 +67,9 @@ function setToolSidebarHidden(hidden: boolean) {
   toolSidebarToggle.querySelector('i')!.className = hidden ? 'icon icon-panel-left-open' : 'icon icon-panel-left-close';
 }
 
-// Only restore the preference if the user has not already toggled the toolbar.
-let toolSidebarToggled = false;
-void desktop.getToolSidebarHidden().then(hidden => {
-  if (!toolSidebarToggled) setToolSidebarHidden(hidden);
-}).catch(() => {});
+setToolSidebarHidden(toolSidebar.hidden);
 
 click('toggle-tool-sidebar', () => {
-  toolSidebarToggled = true;
   setToolSidebarHidden(!toolSidebar.hidden);
   void desktop.setToolSidebarHidden(toolSidebar.hidden).catch(error => status(error.message));
 });
@@ -350,6 +344,13 @@ function updatePage(page: number) {
   thumbActive = byId(`thumb-${page}`);
   thumbActive?.classList.add('active');
   thumbActive?.setAttribute('aria-current', 'page');
+  revealActiveThumbnail();
+}
+
+function revealActiveThumbnail() {
+  if (!thumbActive?.getClientRects().length) return;
+  const options = { block: 'nearest', inline: 'nearest', container: 'nearest' } as const;
+  thumbActive.scrollIntoView(options);
 }
 
 function makeThumbnails(documentToRender: NonNullable<typeof doc>) {
@@ -380,7 +381,10 @@ function makeThumbnails(documentToRender: NonNullable<typeof doc>) {
     canvas.width = 1;
     canvas.height = 1;
     canvas.dataset.page = String(number);
-    thumb.append(canvas, String(number));
+    const label = document.createElement('span');
+    label.className = 'thumb-number';
+    label.textContent = String(number);
+    thumb.append(canvas, label);
     fragment.append(thumb);
     thumbnailObserver.observe(canvas);
   }
@@ -885,6 +889,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach(element => 
     byId('thumbnails').hidden = element.dataset.panel !== 'thumbnails';
     byId('outline').hidden = element.dataset.panel !== 'outline';
     if (element.dataset.panel === 'outline') void renderOutline().catch(errorStatus);
+    else revealActiveThumbnail();
   };
 });
 click('open-feedback', () => { void desktop.openFeedback().catch(errorStatus); });
@@ -912,6 +917,7 @@ click('toggle-sidebar', () => {
   const sidebar = byId('sidebar');
   sidebar.hidden = !sidebar.hidden;
   button('toggle-sidebar').setAttribute('aria-expanded', String(!sidebar.hidden));
+  if (!sidebar.hidden) revealActiveThumbnail();
 });
 click('reveal', () => { if (output) void desktop.reveal(output.location).catch(errorStatus); });
 click('previous', () => viewer.previousPage());

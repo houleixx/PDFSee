@@ -259,14 +259,13 @@ async function execute(owner, job) {
 }
 
 const toolSidebarPreference = () => join(app.getPath('userData'), 'tool-sidebar');
-handle('get-tool-sidebar-hidden', () => {
+function isToolSidebarHidden() {
   try {
     return readFileSync(toolSidebarPreference(), 'utf8') === 'hidden';
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+  } catch {
     return false;
   }
-});
+}
 handle('set-tool-sidebar-hidden', (_owner, hidden) => {
   if (typeof hidden !== 'boolean') throw new Error('无效的工具栏状态。');
   const path = toolSidebarPreference();
@@ -432,7 +431,7 @@ app.on('open-file', (event, path) => {
 
 function createWindow() {
   window = new BrowserWindow({
-    width: 1250, height: 820, minWidth: 740, minHeight: 570,
+    width: 1100, height: 820, minWidth: 740, minHeight: 570,
     title: 'PDFSee', backgroundColor: '#fafaf9',
     webPreferences: { preload: join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
   });
@@ -474,7 +473,11 @@ if (!app.requestSingleInstanceLock()) {
         if (!file.startsWith(dist + sep)) return new Response(null, { status: 404 });
         const data = await readFile(file);
         const mime = mimeTypes[extname(file)] ?? 'application/octet-stream';
-        return new Response(data, { headers: { 'Content-Type': mime, 'X-Content-Type-Options': 'nosniff' } });
+        // Set the sidebar state in the initial HTML, before the first layout.
+        const body = file === join(dist, 'index.html') && isToolSidebarHidden()
+          ? data.toString('utf8').replace('<aside id="tool-sidebar"', '<aside hidden id="tool-sidebar"')
+          : data;
+        return new Response(body, { headers: { 'Content-Type': mime, 'X-Content-Type-Options': 'nosniff' } });
       } catch {
         return new Response(null, { status: 404 });
       }

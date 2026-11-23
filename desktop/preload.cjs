@@ -7,7 +7,6 @@ async function invoke(channel, ...args) {
 }
 
 contextBridge.exposeInMainWorld('desktop', {
-  getToolSidebarHidden: () => invoke('get-tool-sidebar-hidden'),
   setToolSidebarHidden: hidden => invoke('set-tool-sidebar-hidden', hidden),
   openFeedback: () => invoke('open-feedback'),
   canRecognizePages: process.platform === 'darwin',
