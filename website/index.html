@@ -5,7 +5,7 @@
   <script src="assets/language-d8e2f1a3.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDFSee — 免费开源的桌面 PDF 阅读器与页面工具</title>
-  <meta name="description" content="PDFSee 是免费开源、无广告的桌面 PDF 阅读器与页面工具，支持阅读、合并、拆分、提取页面、图片转 PDF 和文档转 PDF。本地处理，文档保留在本机。适用于 macOS 和 Windows。">
+  <meta name="description" content="PDFSee 是免费开源、无广告的桌面 PDF 阅读器与页面工具，支持阅读、合并、拆分、提取页面和从 PDF 导出。本地处理，文档保留在本机。适用于 macOS 和 Windows。">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="theme-color" content="#F7F7F4">
   <link rel="canonical" href="https://pdfsee.pages.dev/">
@@ -19,7 +19,7 @@
   <meta property="og:site_name" content="PDFSee">
   <meta property="og:url" content="https://pdfsee.pages.dev/">
   <meta property="og:title" content="PDFSee — 免费开源的桌面 PDF 阅读器与页面工具">
-  <meta property="og:description" content="本地处理 PDF，无需注册。支持阅读、合并、拆分、提取页面、图片转 PDF 和文档转 PDF。">
+  <meta property="og:description" content="本地处理 PDF，无需注册。支持阅读、合并、拆分、提取页面和从 PDF 导出。">
   <meta property="og:image" content="https://pdfsee.pages.dev/assets/social-preview-459ce210.jpg">
   <meta property="og:image:type" content="image/jpeg">
   <meta property="og:image:width" content="1200">
@@ -46,7 +46,7 @@
         "@id": "https://pdfsee.pages.dev/#app",
         "name": "PDFSee",
         "url": "https://pdfsee.pages.dev/",
-        "description": "免费开源的桌面 PDF 阅读器与页面工具，支持阅读、合并、拆分、提取页面、图片转 PDF 和文档转 PDF。",
+        "description": "免费开源的桌面 PDF 阅读器与页面工具，支持阅读、合并、拆分、提取页面和从 PDF 导出。",
         "applicationCategory": "DocumentApplication",
         "operatingSystem": "macOS, Windows",
         "isAccessibleForFree": true,
@@ -54,7 +54,7 @@
         "downloadUrl": "https://github.com/houleixx/PDFSee/releases/latest",
         "image": "https://pdfsee.pages.dev/assets/social-preview-459ce210.jpg",
         "sameAs": "https://github.com/houleixx/PDFSee",
-        "featureList": ["阅读 PDF", "合并 PDF", "拆分 PDF", "提取和整理页面", "PDF 打印", "PDF 转 PNG、长图和纯图 PDF", "PDF 转 Word 和 PPT", "图片转 PDF", "文档转 PDF"],
+        "featureList": ["阅读 PDF", "合并 PDF", "拆分 PDF", "提取和整理页面", "PDF 打印", "PDF 转 PNG、长图和纯图 PDF", "PDF 转 Word 和 PPT"],
         "offers": {
           "@type": "Offer",
           "price": "0",
@@ -105,7 +105,6 @@
             <li>阅读 PDF · 缩略图 · 目录 · 搜索 · 打印</li>
             <li>合并 · 拆分 · 提取页面</li>
             <li>PDF 转图片 · 长图 · 纯图 PDF · Word · PPT</li>
-            <li>图片与 Office 文档转 PDF</li>
             <li>macOS 与 Windows</li>
           </ul>
           <div class="hero-ctas">
@@ -194,38 +193,6 @@
         </div>
       </article>
 
-      <!-- Story 06: Convert to PDF -->
-      <article class="story">
-        <div class="story-text">
-          <span class="story-number">06</span>
-          <h2 class="section-title story-title"><span>图片转 PDF</span> <span>文档转 PDF</span></h2>
-          <p class="story-desc">
-            将 JPG、PNG 按指定顺序转换为 PDF，支持按图片尺寸、A4 或 Letter 生成各页。Word、Excel、PowerPoint 等文档可通过本机 LibreOffice 转为 PDF。缺少 LibreOffice 时，PDFSee 可在你确认后下载并校验官方安装包。
-          </p>
-        </div>
-        <div class="story-image">
-          <img src="assets/feature-convert-pdf-585df8f7.webp" alt="PDFSee 将两张 PNG 图片转换为 A4 PDF" width="1080" height="729" loading="lazy">
-        </div>
-      </article>
-
-    </div>
-  </section>
-
-  <!-- ========== Format Strip ========== -->
-  <section class="formats" aria-labelledby="formats-title">
-    <div class="container">
-      <h2 class="formats-label" id="formats-title">支持的输入格式</h2>
-      <div class="formats-grid">
-        <span class="format-tag">PDF <span class="ext">.pdf</span></span>
-        <span class="format-tag">图片 <span class="ext">.jpg, .jpeg, .png</span></span>
-        <span class="format-tag">Word <span class="ext">.doc, .docx</span></span>
-        <span class="format-tag">Excel <span class="ext">.xls, .xlsx</span></span>
-        <span class="format-tag">PowerPoint <span class="ext">.ppt, .pptx</span></span>
-        <span class="format-tag">OpenDocument <span class="ext">.odt, .ods, .odp</span></span>
-        <span class="format-tag">RTF <span class="ext">.rtf</span></span>
-        <span class="format-tag">纯文本 <span class="ext">.txt</span></span>
-      </div>
-      <p class="formats-note">文档转 PDF 需要本机安装 <a href="https://www.libreoffice.org/" target="_blank" rel="noopener">LibreOffice</a>，排版效果取决于 LibreOffice 和本机字体。</p>
     </div>
   </section>
 
