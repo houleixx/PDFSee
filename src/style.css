@@ -193,6 +193,7 @@ dialog input { width: 100%; }
 }
 .update-ignore:hover { color: var(--ink); text-decoration: underline; }
 #update-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#update-dialog button.primary:focus-visible { outline: none; background: var(--accent-hover); }
 @media print { #update-dialog, #update-dialog::backdrop { display: none; } }
 @media (max-width: 900px) {
   .shell { grid-template-columns: 172px minmax(0, 1fr); }
