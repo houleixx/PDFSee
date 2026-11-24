@@ -39,21 +39,6 @@ a {
   scroll-margin-top: 80px;
 }
 
-.skip-link {
-  position: fixed;
-  top: 8px;
-  left: 16px;
-  z-index: 200;
-  padding: 10px 16px;
-  background: var(--surface);
-  border-radius: var(--radius-sm);
-  transform: translateY(-150%);
-}
-
-.skip-link:focus {
-  transform: translateY(0);
-}
-
 /* ========== Design Tokens ========== */
 :root {
   --canvas: #F7F7F4;
@@ -249,6 +234,22 @@ a {
   align-items: center;
   gap: 12px;
   margin-top: 40px;
+}
+
+[data-download-platform="windows"] [data-download="windows"] {
+  order: -1;
+}
+
+[data-download-platform="windows"] [data-download="macos"],
+[data-download-platform="macos"] [data-download="windows"] {
+  color: var(--primary-ink);
+  background: var(--surface);
+  border-color: var(--primary-border);
+}
+
+[data-download-platform="windows"] [data-download="macos"]:hover,
+[data-download-platform="macos"] [data-download="windows"]:hover {
+  background: var(--primary-tint);
 }
 
 .hero-source-link {
@@ -628,6 +629,11 @@ a {
   html[lang="en"] .hero-title-row { flex-wrap: nowrap; gap: 8px; }
   html[lang="en"] .hero-title-row .display-title { font-size: clamp(36px, 14cqi, 76px); flex-shrink: 0; }
   html[lang="en"] .hero-badge { font-size: clamp(9px, 3cqi, 16px); padding: 7px 10px; flex-shrink: 0; }
+}
+
+/* Align the image edge with the visible title rather than its line box. */
+@media (min-width: 1001px) {
+  .hero-image { margin-top: clamp(8px, 1vw, 16px); }
 }
 
 /* Anchor artwork independently of translated copy height. On narrow desktops,

@@ -6,7 +6,7 @@
 
 网站目录 `website/` 直接作为 Cloudflare Pages 的构建输出目录。无需构建步骤。
 
-中英文首页的两个下载按钮各保存一个带版本号的 GitHub 安装包直链。页面脚本判断平台，并查询 GitHub 最新正式版本。查到对应安装包后会替换按钮地址，查询失败或缺少附件时继续使用 HTML 中的直链。GitHub Release 上传两个安装包后，发布流程将新地址写入默认分支，由 Cloudflare Pages 更新网站。
+中英文首页的两个下载按钮各保存一个带版本号的 GitHub 安装包直链。页面在首次绘制前判断平台，下载脚本再查询 GitHub 最新正式版本。查到对应安装包后会替换按钮地址，查询失败或缺少附件时继续使用 HTML 中的直链。GitHub Release 上传两个安装包后，发布流程将新地址写入默认分支，由 Cloudflare Pages 更新网站。
 
 ## 问题反馈
 
@@ -21,7 +21,7 @@ website/
     index.html                  # 英文首页
   404.html                      # 404 页面（双语）
   assets/
-    styles-870f3a2a.css         # 样式表
+    styles-0c69dd23.css         # 样式表
     language-d8e2f1a3.js        # 语言检测脚本
     brand-mark-27f00275.png     # 品牌图标（导航和页脚）
     favicon-b047b4a1.png        # 96x96 图标

@@ -3,7 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <script src="../assets/language-d8e2f1a3.js"></script>
-  <script defer src="../assets/download-9471780f.js"></script>
+  <script>
+    (() => {
+      const platform = navigator.userAgentData?.platform || navigator.platform || '';
+      const mobile = navigator.userAgentData?.mobile || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+        || (/^Mac/i.test(platform) && navigator.maxTouchPoints > 1);
+      const preferred = mobile ? '' : /^Win/i.test(platform) ? 'windows' : /^Mac/i.test(platform) ? 'macos' : '';
+      if (preferred) document.documentElement.dataset.downloadPlatform = preferred;
+    })();
+  </script>
+  <script defer src="../assets/download-ab9f56fc.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDFSee — Free Open Source PDF Reader & Page Tools</title>
   <meta name="description" content="PDFSee is a free, open source desktop PDF reader and page tool. Read, merge, split, extract pages and export from PDF. Local processing, documents stay on your machine. For macOS and Windows.">
@@ -66,11 +75,9 @@
     ]
   }
   </script>
-  <link rel="stylesheet" href="../assets/styles-870f3a2a.css">
+  <link rel="stylesheet" href="../assets/styles-0c69dd23.css">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to main content</a>
-
   <!-- ========== Navigation ========== -->
   <nav class="nav" aria-label="Main navigation">
     <div class="nav-inner">
@@ -91,7 +98,7 @@
     </div>
   </nav>
 
-  <main id="main" tabindex="-1">
+  <main id="main">
   <!-- ========== Hero ========== -->
   <section class="hero" aria-labelledby="hero-title">
     <div class="container">
