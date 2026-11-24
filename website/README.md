@@ -6,6 +6,8 @@
 
 网站目录 `website/` 直接作为 Cloudflare Pages 的构建输出目录。无需构建步骤。
 
+中英文首页的两个下载按钮各保存一个带版本号的 GitHub 安装包直链。页面脚本只判断平台。GitHub Release 上传两个安装包后，发布流程将新地址写入默认分支，由 Cloudflare Pages 更新网站。
+
 ## 问题反馈
 
 应用顶部的「反馈」按钮和中英文首页页脚都打开 `https://pdfsee.pages.dev/feedback`。Cloudflare Pages 部署后，`_redirects` 将 `/feedback` 与 `/feedback/` 以 302 跳转到小红书反馈帖。以后更换帖子时，只需更新这两条网站规则。

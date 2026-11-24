@@ -226,3 +226,34 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --verify-tag --title "PDFSee $GITHUB_REF_NAME" --generate-notes
           fi
           gh release upload "$GITHUB_REF_NAME" "$DMG_NAME" "$EXE_NAME" SHA256SUMS.txt --clobber
+
+      - name: Check out website branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: website-source
+
+      - name: Update website download links
+        working-directory: website-source
+        env:
+          WEBSITE_BRANCH: ${{ github.event.repository.default_branch }}
+          DMG_NAME: ${{ needs.release.outputs.dmg_name }}
+          EXE_NAME: ${{ needs.windows.outputs.exe_name }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3; do
+            git fetch origin "refs/heads/$WEBSITE_BRANCH"
+            git checkout --detach FETCH_HEAD
+            node scripts/update-website-downloads.cjs "$GITHUB_REF_NAME" "$DMG_NAME" "$EXE_NAME"
+            if git diff --quiet -- website/index.html website/en/index.html; then
+              exit 0
+            fi
+            git add -- website/index.html website/en/index.html
+            git commit -m "更新官网下载链接 $GITHUB_REF_NAME"
+            if git push origin "HEAD:refs/heads/$WEBSITE_BRANCH"; then
+              exit 0
+            fi
+          done
+          exit 1
