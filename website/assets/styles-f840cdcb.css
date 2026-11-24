@@ -256,14 +256,16 @@ a {
   align-items: center;
   min-height: 44px;
   margin-top: 4px;
+  gap: 8px;
   color: var(--muted);
   font-size: 14px;
-  text-decoration: underline;
+  text-decoration: none;
   text-underline-offset: 3px;
 }
 
 .hero-source-link:hover {
   color: var(--primary-hover);
+  text-decoration: underline;
 }
 
 .btn-primary {
