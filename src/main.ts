@@ -91,6 +91,20 @@ const tools = {
 } as const;
 
 type Mode = 'read' | keyof typeof tools;
+const toolSuccessLabels: Record<Exclude<Mode, 'read' | 'raster'> | PdfFormat, string> = {
+  merge: '合并完成',
+  split: '拆分完成',
+  extract: '页面已提取',
+  organize: '整理完成',
+  pages: '逐页图已导出',
+  long: '长图已保存',
+  flat: '纯图 PDF 已保存',
+  pptx: 'PPT 已保存',
+  docx: 'Word 已保存',
+  image: '图片已转为 PDF',
+  office: '文档已转为 PDF'
+};
+
 let mode: Mode = 'read';
 let pdfFormat: PdfFormat = 'pages';
 let current: FileInfo | null = null;
@@ -158,7 +172,7 @@ function errorStatus(error: unknown) {
 
 let successToastTimer = 0;
 
-function showSuccessToast(label = '处理成功') {
+function showSuccessToast(label: string) {
   const toast = byId('success-toast');
   byId('success-toast-text').textContent = label;
   toast.hidden = false;
@@ -166,7 +180,7 @@ function showSuccessToast(label = '处理成功') {
   successToastTimer = window.setTimeout(() => { toast.hidden = true; }, 1600);
 }
 
-function success(result: ToolResult | null) {
+function success(result: ToolResult | null, label: string) {
   if (result && 'message' in result && result.message) {
     if ('location' in result) {
       status(result.message, false, result);
@@ -179,7 +193,7 @@ function success(result: ToolResult | null) {
   if (!result || !('location' in result)) return status('已取消保存。');
   status(result.kind === 'images' ? `已导出 ${result.count} 张 PNG 图片` :
     result.count ? `已导出 ${result.count} 份 PDF` : `已保存 ${result.name}`, false, result);
-  showSuccessToast();
+  showSuccessToast(label);
 }
 
 function refreshSection() {
@@ -806,7 +820,7 @@ async function exportImage() {
     const rotation = (page.rotate + viewRotation) % 360;
     const bytes = await renderPng(page, rotation);
     if (active !== doc || mode !== 'read') return;
-    success(await desktop.saveImage(`${name}-第${number}页.png`, bytes));
+    success(await desktop.saveImage(`${name}-第${number}页.png`, bytes), '当前页已导出');
   } catch (error) { errorStatus(error); }
   finally { exporting = false; }
 }
@@ -991,11 +1005,12 @@ async function runTool(event: SubmitEvent) {
   controls.forEach(control => { control.disabled = true; });
   refreshFiles();
   status(`正在处理 · ${mode === 'raster' ? pdfFormats[pdfFormat].title : tools[mode].title}`);
+  const successLabel = toolSuccessLabels[mode === 'raster' ? pdfFormat : mode];
   try {
     success(mode === 'raster' ? await exportImages() : await desktop.execute({
       mode, ids: selections.map(file => file.id), spec: input('page-spec').value,
       groupSize: Number(input('group-size').value), rotation: Number(select('rotation').value), paper: select('paper').value
-    }));
+    }), successLabel);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') status('已取消转换。');
     else errorStatus(error);
@@ -1135,7 +1150,7 @@ click('save-page-edit', () => {
   running = true;
   void desktop.saveEditedPdf(id).then(result => {
     if (result) savedPageVersion = id;
-    success(result);
+    success(result, '已另存 PDF');
   }).catch(errorStatus).finally(() => { running = false; });
 });
 
