@@ -6,7 +6,7 @@
 
 网站目录 `website/` 直接作为 Cloudflare Pages 的构建输出目录。无需构建步骤。
 
-中英文首页的两个下载按钮各保存一个带版本号的 GitHub 安装包直链。页面脚本只判断平台。GitHub Release 上传两个安装包后，发布流程将新地址写入默认分支，由 Cloudflare Pages 更新网站。
+中英文首页的两个下载按钮各保存一个带版本号的 GitHub 安装包直链。页面脚本判断平台，并查询 GitHub 最新正式版本。查到对应安装包后会替换按钮地址，查询失败或缺少附件时继续使用 HTML 中的直链。GitHub Release 上传两个安装包后，发布流程将新地址写入默认分支，由 Cloudflare Pages 更新网站。
 
 ## 问题反馈
 
