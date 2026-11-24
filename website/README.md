@@ -23,15 +23,15 @@ website/
   assets/
     styles-0c69dd23.css         # 样式表
     language-d8e2f1a3.js        # 语言检测脚本
-    brand-mark-7af37000.png     # 品牌图标（导航和页脚）
-    favicon-707c3204.png        # 96x96 图标
-    social-preview-176b1321.jpg # 社交分享预览图（1200x630）
-    hero-app-preview-bbb2a151.webp  # Hero 区域展示图（1200x1006）
-    feature-read-pdf-11019383.webp  # 功能1：阅读 PDF（1080x720）
+    brand-mark-e2934915.png     # 品牌图标（导航和页脚）
+    favicon-4236d9f1.png        # 96x96 图标
+    social-preview-4da92a2c.jpg # 社交分享预览图（1200x630）
+    hero-app-preview-cc82d580.webp  # Hero 区域展示图（1200x1006）
+    feature-read-pdf-e2c49f43.webp  # 功能1：阅读 PDF（1080x720）
     feature-merge-pdf-e79c04a5.webp   # 功能2：合并 PDF（1080x729）
     feature-split-pdf-6cd6f516.webp   # 功能3：拆分 PDF（1080x900）
     feature-extract-pages-a70b2f69.webp # 功能4：提取页面（1080x777）
-    feature-export-pdf-4cd26c00.webp   # 功能5：从 PDF 导出（1080x720）
+    feature-export-pdf-be06d70e.webp   # 功能5：从 PDF 导出（1080x720）
     feature-convert-pdf-585df8f7.webp   # 功能6：生成 PDF（1080x729）
   robots.txt
   sitemap.xml
