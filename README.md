@@ -39,7 +39,7 @@ npm test
 测试覆盖页码解析、导出页顺序、旋转、合并、图片转 PDF，以及 PDF 转图片的页码选择、文件保存与取消清理。
 
 - 在 macOS 执行 `npm run package:mac`，生成当前架构的 Developer ID 签名 DMG。打包需要 Python 3、Swift 和 macOS 磁盘映像工具。脚本使用 dmgbuild 创建与 PicSee 一致的 Finder 布局和 Retina 背景。可传入 `-- --arm64`、`-- --x64` 或 `-- --universal` 指定架构。
-- 在 Windows 执行 `npm run package:win`，生成 x64 的 NSIS 安装程序 `PDFSee-windows-版本号.exe`。
+- 在 Windows 执行 `npm run package:win`，生成 x64 的 NSIS 安装程序 `PDFSee-windows-版本号.exe`。首次安装可在向导中选择安装目录，也可使用默认位置。
 
 打包产物输出到 `release/`。macOS 脚本默认使用钥匙串中与 PicSee 相同团队的 Developer ID Application 身份。使用其他团队时，可设置 `PDFSEE_MAC_TEAM_ID`。
 

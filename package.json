@@ -48,6 +48,8 @@
       "icon": "assets/PDFSee.ico"
     },
     "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
       "artifactName": "PDFSee-windows-${version}.${ext}"
     },
     "fileAssociations": [
