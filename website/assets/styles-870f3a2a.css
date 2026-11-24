@@ -255,10 +255,10 @@ a {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  margin-top: 4px;
   gap: 8px;
   color: var(--muted);
   font-size: 14px;
+  white-space: nowrap;
   text-decoration: none;
   text-underline-offset: 3px;
 }

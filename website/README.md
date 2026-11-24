@@ -21,7 +21,7 @@ website/
     index.html                  # 英文首页
   404.html                      # 404 页面（双语）
   assets/
-    styles-f840cdcb.css         # 样式表
+    styles-870f3a2a.css         # 样式表
     language-d8e2f1a3.js        # 语言检测脚本
     brand-mark-27f00275.png     # 品牌图标（导航和页脚）
     favicon-b047b4a1.png        # 96x96 图标
