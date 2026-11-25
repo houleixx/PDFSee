@@ -6,6 +6,7 @@ import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/legacy/web/pdf_viewer.css';
 import 'lucide-static/font/lucide.css';
 import './style.css';
+import { applyLanguage, localizedAttribute, localizedText, registerStaticTranslations, translate, type Language } from './i18n';
 import { createPageOcr, type RecognizedLine } from './page-ocr';
 
 type Kind = 'pdf' | 'image' | 'office';
@@ -51,6 +52,8 @@ type Bridge = {
   onUpdatePrompt(callback: (prompt: UpdatePrompt) => void): void;
   onUpdateProgress(callback: (progress: UpdateProgress | null) => void): void;
   onMenu(callback: (command: string) => void): void;
+  getLanguage(): Promise<Language>;
+  onLanguage(callback: (language: Language) => void): void;
   ready(): Promise<void>;
 };
 const desktop = (window as Window & { desktop?: Bridge }).desktop!;
@@ -65,12 +68,20 @@ const toolSidebarToggle = button('toggle-tool-sidebar');
 function setToolSidebarHidden(hidden: boolean) {
   toolSidebar.hidden = hidden;
   const label = hidden ? '显示工具栏' : '隐藏工具栏';
-  toolSidebarToggle.title = label;
-  toolSidebarToggle.setAttribute('aria-label', label);
+  localizedAttribute(toolSidebarToggle, 'title', label);
+  localizedAttribute(toolSidebarToggle, 'aria-label', label);
   toolSidebarToggle.setAttribute('aria-expanded', String(!hidden));
   toolSidebarToggle.querySelector('i')!.className = hidden ? 'icon icon-panel-left-open' : 'icon icon-panel-left-close';
 }
 
+registerStaticTranslations();
+let languageChanged = false;
+desktop.onLanguage(language => {
+  languageChanged = true;
+  applyLanguage(language);
+});
+const preferredLanguage = await desktop.getLanguage();
+if (!languageChanged) applyLanguage(preferredLanguage);
 setToolSidebarHidden(toolSidebar.hidden);
 
 click('toggle-tool-sidebar', () => {
@@ -160,8 +171,8 @@ if (pageOcr) {
 function status(message: string, error = false, result: Output | null = null) {
   output = result;
   const text = byId('status-text');
-  text.textContent = message;
-  text.title = message;
+  localizedText(text, message);
+  localizedAttribute(text, 'title', message);
   text.parentElement?.classList.toggle('error', error);
   button('reveal').hidden = !output;
 }
@@ -174,7 +185,7 @@ let successToastTimer = 0;
 
 function showSuccessToast(label: string) {
   const toast = byId('success-toast');
-  byId('success-toast-text').textContent = label;
+  localizedText(byId('success-toast-text'), label);
   toast.hidden = false;
   window.clearTimeout(successToastTimer);
   successToastTimer = window.setTimeout(() => { toast.hidden = true; }, 1600);
@@ -200,7 +211,9 @@ function refreshSection() {
   byId('home').hidden = mode !== 'read' || !!doc;
   byId('reader').hidden = mode !== 'read' || !doc;
   byId('tools').hidden = mode === 'read';
-  byId('section-title').textContent = mode === 'read' ? current?.name ?? '阅读 PDF' : mode === 'raster' ? pdfFormats[pdfFormat].title : tools[mode].title;
+  const title = byId('section-title');
+  if (mode === 'read' && current) title.textContent = current.name;
+  else localizedText(title, mode === 'read' ? '阅读 PDF' : mode === 'raster' ? pdfFormats[pdfFormat].title : tools[mode].title);
   document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach(node => {
     const active = node.dataset.mode === mode && (mode !== 'raster' || node.dataset.pdfFormat === pdfFormat);
     node.classList.toggle('active', active);
@@ -226,7 +239,7 @@ function hasUnsavedPageEdits() {
 }
 
 function confirmDiscardEdits() {
-  return !hasUnsavedPageEdits() || window.confirm('页面改动尚未另存。要放弃改动吗？');
+  return !hasUnsavedPageEdits() || window.confirm(translate('页面改动尚未另存。要放弃改动吗？'));
 }
 
 window.addEventListener('beforeunload', event => {
@@ -261,15 +274,15 @@ function setMode(next: Mode, format = pdfFormat) {
   if (mode === 'read') return;
   const tool = tools[mode];
   byId('tool-icon').replaceChildren(icon(tool.icon));
-  byId('tool-title').textContent = tool.title;
-  byId('tool-description').textContent = tool.description;
-  byId('pick-label').textContent = tool.multi ? '添加文件或拖到此处' : '选择文件或拖到此处';
-  byId('pick-hint').textContent = tool.hint;
-  byId('run-label').textContent = tool.submit;
+  localizedText(byId('tool-title'), tool.title);
+  localizedText(byId('tool-description'), tool.description);
+  localizedText(byId('pick-label'), tool.multi ? '添加文件或拖到此处' : '选择文件或拖到此处');
+  localizedText(byId('pick-hint'), tool.hint);
+  localizedText(byId('run-label'), tool.submit);
   byId('page-options').hidden = !['split', 'extract', 'organize'].includes(mode);
   byId('image-range-options').hidden = mode !== 'raster';
-  byId('page-spec-label').textContent = mode === 'raster' ? '页码范围' : '页码范围或新顺序';
-  input('page-spec').placeholder = mode === 'raster' ? '例如 2 或 1-3, 5' : '例如 1-3, 5, 8-6';
+  localizedText(byId('page-spec-label'), mode === 'raster' ? '页码范围' : '页码范围或新顺序');
+  localizedAttribute(input('page-spec'), 'placeholder', mode === 'raster' ? '例如 2 或 1-3, 5' : '例如 1-3, 5, 8-6');
   byId('split-options').hidden = mode !== 'split';
   byId('rotation-options').hidden = mode !== 'organize';
   byId('paper-options').hidden = mode !== 'image';
@@ -291,7 +304,7 @@ function clearReader(preserveSearch = false) {
   outlineLoaded = false;
   if (preserveSearch) {
     clearTimeout(searchTimer);
-    byId('matches').textContent = '';
+    localizedText(byId('matches'), '');
   } else {
     input('search').value = '';
     closeSearch();
@@ -398,7 +411,7 @@ async function openDocument(file: FileInfo, page?: number) {
     loading.onPassword = (submit, reason) => {
       if (version !== loadVersion) return;
       const dialog = byId<HTMLDialogElement>('password-dialog');
-      byId('password-title').textContent = reason === PasswordResponses.INCORRECT_PASSWORD ? '密码有误，请重新输入' : '输入 PDF 密码';
+      localizedText(byId('password-title'), reason === PasswordResponses.INCORRECT_PASSWORD ? '密码有误，请重新输入' : '输入 PDF 密码');
       input('password').value = '';
       dialog.returnValue = 'cancel';
       dialog.onclose = () => {
@@ -489,7 +502,7 @@ function makeThumbnails(documentToRender: NonNullable<typeof doc>) {
     const thumb = document.createElement('button');
     thumb.id = `thumb-${number}`;
     thumb.className = 'thumb';
-    thumb.setAttribute('aria-label', `第 ${number} 页`);
+    localizedAttribute(thumb, 'aria-label', `第 ${number} 页`);
     thumb.onclick = () => { viewer.currentPageNumber = number; };
     thumb.draggable = true;
     thumb.ondragstart = event => {
@@ -549,7 +562,7 @@ async function renderOutline() {
   const entries = await active.getOutline();
   if (doc !== active) return;
   const target = byId('outline');
-  if (!entries?.length) { target.textContent = '此文档没有目录。'; return; }
+  if (!entries?.length) { localizedText(target, '此文档没有目录。'); return; }
   function append(items: NonNullable<typeof entries>, depth: number) {
     for (const item of items) {
       const element = document.createElement('button');
@@ -576,7 +589,7 @@ function openSearch() {
 function closeSearch() {
   clearTimeout(searchTimer);
   byId('find-bar').hidden = true;
-  byId('matches').textContent = '';
+  localizedText(byId('matches'), '');
   bus.dispatch('findbarclose', { source: input('search') });
 }
 
@@ -589,8 +602,8 @@ function find(again = false, previous = false) {
 }
 
 function findCount({ matchesCount }: { matchesCount?: { current: number; total: number } }) {
-  byId('matches').textContent = !input('search').value || !matchesCount
-    ? '' : matchesCount.total ? `${matchesCount.current} / ${matchesCount.total}` : '无匹配';
+  localizedText(byId('matches'), !input('search').value || !matchesCount
+    ? '' : matchesCount.total ? `${matchesCount.current} / ${matchesCount.total}` : '无匹配');
 }
 
 bus.on('pagesinit', () => {
@@ -625,7 +638,7 @@ bus.on('scalechanging', ({ scale, presetValue }) => {
 });
 bus.on('updatefindmatchescount', findCount);
 bus.on('updatefindcontrolstate', ({ state, matchesCount }) => {
-  if (state === 3 && input('search').value) byId('matches').textContent = '搜索中…';
+  if (state === 3 && input('search').value) localizedText(byId('matches'), '搜索中…');
   else findCount({ matchesCount });
 });
 
@@ -802,10 +815,10 @@ const pdfFormats: Record<PdfFormat, { title: string; icon: string; hint: string;
 
 function refreshPdfFormat() {
   const format = pdfFormats[pdfFormat];
-  byId('tool-title').textContent = format.title;
-  byId('tool-description').textContent = format.hint;
+  localizedText(byId('tool-title'), format.title);
+  localizedText(byId('tool-description'), format.hint);
   byId('tool-icon').replaceChildren(icon(format.icon));
-  byId('run-label').textContent = format.action;
+  localizedText(byId('run-label'), format.action);
 }
 
 async function exportImage() {
@@ -913,8 +926,8 @@ function listAction(label: string, glyph: string, action: () => void, disabled =
   const control = document.createElement('button');
   control.type = 'button';
   control.className = 'square';
-  control.title = label;
-  control.setAttribute('aria-label', label);
+  localizedAttribute(control, 'title', label);
+  localizedAttribute(control, 'aria-label', label);
   control.disabled = disabled;
   control.append(icon(glyph));
   control.onclick = action;
@@ -955,11 +968,11 @@ function refreshFiles() {
   button('use-current').disabled = running;
   if (mode === 'raster') {
     const count = doc && current && selections[0]?.id === current.id ? `文档共有 ${doc.numPages} 页。` : '';
-    byId('spec-hint').textContent = `${count}输入单个页码或页码范围，每个页面只导出一次。`;
+    localizedText(byId('spec-hint'), `${count}输入单个页码或页码范围，每个页面只导出一次。`);
   } else if (doc && current && selections[0]?.id === current.id) {
-    byId('spec-hint').textContent = `文档共有 ${doc.numPages} 页。留空使用全部页面。`;
+    localizedText(byId('spec-hint'), `文档共有 ${doc.numPages} 页。留空使用全部页面。`);
   } else {
-    byId('spec-hint').textContent = '留空使用全部页面。可按你输入的顺序导出。';
+    localizedText(byId('spec-hint'), '留空使用全部页面。可按你输入的顺序导出。');
   }
 }
 
@@ -1244,8 +1257,8 @@ desktop.onError(errorStatus);
 desktop.onUpdatePrompt(prompt => {
   const dialog = byId<HTMLDialogElement>('update-dialog');
   const detail = byId('update-detail');
-  byId('update-title').textContent = prompt.message;
-  detail.textContent = prompt.detail ?? '';
+  localizedText(byId('update-title'), prompt.message);
+  localizedText(detail, prompt.detail ?? '');
   detail.hidden = !prompt.detail;
   const labels = prompt.buttons ?? ['确定'];
   const primary = prompt.defaultId ?? 0;
@@ -1255,7 +1268,7 @@ desktop.onUpdatePrompt(prompt => {
     const action = document.createElement('button');
     action.className = index === primary ? 'button primary' : index === 2 ? 'update-ignore' : 'button secondary';
     action.value = String(index);
-    action.textContent = labels[index];
+    localizedText(action, labels[index]);
     action.autofocus = index === primary;
     return action;
   });
@@ -1271,7 +1284,7 @@ desktop.onUpdateProgress(progress => {
   if (!progress) return;
   const { version, phase, percent } = progress;
   const label = phase === 'download' ? `正在下载 ${version}` : `正在准备安装 ${version}`;
-  byId('update-label').textContent = percent === null ? label : `${label} · ${percent}%`;
+  localizedText(byId('update-label'), percent === null ? label : `${label} · ${percent}%`);
   const meter = byId<HTMLProgressElement>('update-meter');
   if (percent === null) meter.removeAttribute('value');
   else meter.value = percent;

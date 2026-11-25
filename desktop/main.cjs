@@ -9,6 +9,7 @@ const { extensions: exportExtensions } = require('./pdf-formats.cjs');
 const { findOffice } = require('./office.cjs');
 const { findInstaller, downloadInstaller } = require('./office-download.cjs');
 const { createUpdater } = require('./updates.cjs');
+const translations = require('./translations.json');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'pdfsee', privileges: {
   standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true
@@ -30,6 +31,37 @@ const mimeTypes = {
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.wasm': 'application/wasm'
 };
 let window;
+let language = 'zh-CN';
+const languages = { 'zh-CN': '简体中文', en: 'English' };
+const t = source => language === 'en' && Object.hasOwn(translations, source) ? translations[source] : source;
+const languagePath = () => join(app.getPath('userData'), 'language');
+
+function readLanguage() {
+  try {
+    const saved = readFileSync(languagePath(), 'utf8').trim();
+    if (Object.hasOwn(languages, saved)) return saved;
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn(error.message);
+  }
+  const locale = app.getPreferredSystemLanguages()[0] ?? app.getLocale();
+  return /^zh(?:-|$)/i.test(locale) ? 'zh-CN' : 'en';
+}
+
+function setLanguage(next) {
+  try {
+    const path = languagePath();
+    writeFileSync(`${path}.tmp`, next, 'utf8');
+    renameSync(`${path}.tmp`, path);
+    language = next;
+    window?.webContents.send('language', next);
+  } catch (error) {
+    console.warn(error.message);
+    void dialog.showMessageBox({
+      type: 'error', message: t('无法保存语言偏好。'), buttons: [t('确定')]
+    });
+  }
+  installMenu();
+}
 let busy = false;
 let imageExport = null;
 let updateProgress = null;
@@ -191,9 +223,9 @@ async function saveAtomically(path, write) {
 async function offerOfficeDownload() {
   const target = window;
   const { response } = await dialog.showMessageBox(target, {
-    type: 'info', message: '文档转 PDF 需要 LibreOffice',
-    detail: 'PDFSee 可以下载适用于这台电脑的官方安装包。下载后安装 LibreOffice，再回来转换文档。',
-    buttons: ['下载安装包', '稍后'], defaultId: 0, cancelId: 1
+    type: 'info', message: t('文档转 PDF 需要 LibreOffice'),
+    detail: t('PDFSee 可以下载适用于这台电脑的官方安装包。下载后安装 LibreOffice，再回来转换文档。'),
+    buttons: [t('下载安装包'), t('稍后')], defaultId: 0, cancelId: 1
   });
   if (response !== 0 || target.isDestroyed()) return { message: '安装 LibreOffice 后即可转换文档。' };
   const fetch = (url, options) => net.fetch(url, options);
@@ -242,7 +274,7 @@ async function execute(owner, job) {
     const groupSize = Number(job.groupSize);
     if (mode === 'split') {
       if (!Number.isInteger(groupSize) || groupSize < 1 || groupSize > 10000) throw new Error('每份页数应在 1 至 10000 之间。');
-      const result = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(first) });
+      const result = await dialog.showOpenDialog(window, { title: t('选择拆分导出目录'), properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(first) });
       if (result.canceled) return null;
       const directory = await mkdtemp(join(result.filePaths[0], `${stem.slice(0, 65)}-拆分-`));
       try {
@@ -300,7 +332,7 @@ handle('pick', async (owner, kind, multi) => {
   if (!Object.hasOwn(types, kind)) throw new Error('不支持该格式。');
   const result = await dialog.showOpenDialog(window, {
     properties: multi ? ['openFile', 'multiSelections'] : ['openFile'],
-    filters: [{ name: labels[kind], extensions: types[kind] }]
+    filters: [{ name: t(labels[kind]), extensions: types[kind] }]
   });
   return Promise.all(result.filePaths.map(path => register(path, owner)));
 });
@@ -314,10 +346,10 @@ handle('page-menu', (owner, id, canDelete) => {
   getFile(id, owner, 'pdf');
   return new Promise(resolve => {
     const menu = Menu.buildFromTemplate([
-      { label: '在此页前插入 PDF…', click: () => resolve('before') },
-      { label: '在此页后插入 PDF…', click: () => resolve('after') },
+      { label: t('在此页前插入 PDF…'), click: () => resolve('before') },
+      { label: t('在此页后插入 PDF…'), click: () => resolve('after') },
       { type: 'separator' },
-      { label: '删除此页', enabled: canDelete === true, click: () => resolve('delete') }
+      { label: t('删除此页'), enabled: canDelete === true, click: () => resolve('delete') }
     ]);
     menu.popup({ window, callback: () => resolve(null) });
   });
@@ -380,7 +412,7 @@ handle('begin-images', async (owner, id, spec, count, format = 'pages') => {
     const stem = basename(file.path, extname(file.path));
     if (format === 'pages') {
       const result = await dialog.showOpenDialog(window, {
-        title: '选择图片导出目录', properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(file.sources?.[0] ?? file.path)
+        title: t('选择图片导出目录'), properties: ['openDirectory', 'createDirectory'], defaultPath: dirname(file.sources?.[0] ?? file.path)
       });
       if (result.canceled || !window || window.webContents.id !== owner) { busy = false; return null; }
       session = await createImageExport(result.filePaths[0], stem, pages);
@@ -463,6 +495,8 @@ handle('answer-update-prompt', (owner, id, choice) => {
   if (Number.isInteger(choice) && choice >= 0 && choice < count) finishUpdatePrompt(owner, choice);
 });
 
+handle('get-language', () => language);
+
 handle('ready', owner => {
   ready.add(owner);
   if (updateProgress) window.webContents.send('update-progress', updateProgress);
@@ -524,8 +558,8 @@ function createWindow() {
   });
   window.webContents.on('will-prevent-unload', event => {
     const choice = dialog.showMessageBoxSync(window, {
-      type: 'question', message: '页面改动尚未另存。要放弃改动吗？',
-      buttons: ['继续编辑', '放弃改动'], defaultId: 0, cancelId: 0
+      type: 'question', message: t('页面改动尚未另存。要放弃改动吗？'),
+      buttons: [t('继续编辑'), t('放弃改动')], defaultId: 0, cancelId: 0
     });
     if (choice === 1) event.preventDefault();
   });
@@ -540,6 +574,43 @@ function createWindow() {
     for (const id of registered.keys()) void releaseFile(owner, id).catch(() => {});
     window = null;
   });
+}
+
+function installMenu() {
+  const send = command => () => window?.webContents.send('menu', command);
+  const updateItem = { label: t('检查更新…'), click: () => {
+    startupUpdateChecked = true;
+    clearTimeout(startupUpdateTimer);
+    if (!window) createWindow();
+    void checkForUpdates();
+  } };
+  const languageItem = {
+    label: t('语言'),
+    submenu: Object.entries(languages).map(([value, label]) => ({
+      label, type: 'radio', checked: language === value, click: () => setLanguage(value)
+    }))
+  };
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
+      { role: 'about', label: t('关于 PDFSee') }, updateItem, languageItem, { type: 'separator' },
+      { role: 'services', label: t('服务') }, { type: 'separator' },
+      { role: 'hide', label: t('隐藏 PDFSee') }, { role: 'hideOthers', label: t('隐藏其他应用') }, { role: 'unhide', label: t('显示全部') },
+      { type: 'separator' }, { role: 'quit', label: t('退出 PDFSee') }
+    ] }] : []),
+    { label: t('文件'), submenu: [
+      { label: t('打开 PDF…'), accelerator: 'CmdOrCtrl+O', click: send('open') },
+      { label: t('打印…'), accelerator: 'CmdOrCtrl+P', click: send('print') },
+      { label: t('关闭文档'), accelerator: 'CmdOrCtrl+Shift+W', click: send('close') },
+      { role: 'close', label: t('关闭窗口') },
+      { type: 'separator' },
+      ...(process.platform === 'win32' ? [languageItem] : []),
+      { role: 'quit', label: t('退出') }
+    ] },
+    { label: t('编辑'), submenu: [{ role: 'copy', label: t('复制') }, { role: 'selectAll', label: t('全选') },
+      { label: t('在 PDF 中查找'), accelerator: 'CmdOrCtrl+F', click: send('find') }] },
+    { label: t('窗口'), submenu: [{ role: 'minimize', label: t('最小化') }, { role: 'togglefullscreen', label: t('全屏') }] },
+    ...(process.platform === 'win32' ? [{ label: t('帮助'), submenu: [updateItem] }] : [])
+  ]));
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -569,32 +640,8 @@ if (!app.requestSingleInstanceLock()) {
         return new Response(null, { status: 404 });
       }
     });
-    const send = command => () => window?.webContents.send('menu', command);
-    const updateItem = { label: '检查更新…', click: () => {
-      startupUpdateChecked = true;
-      clearTimeout(startupUpdateTimer);
-      if (!window) createWindow();
-      void checkForUpdates();
-    } };
-    Menu.setApplicationMenu(Menu.buildFromTemplate([
-      ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
-        { role: 'about' }, updateItem, { type: 'separator' },
-        { role: 'services' }, { type: 'separator' },
-        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
-        { type: 'separator' }, { role: 'quit' }
-      ] }] : []),
-      { label: '文件', submenu: [
-        { label: '打开 PDF…', accelerator: 'CmdOrCtrl+O', click: send('open') },
-        { label: '打印…', accelerator: 'CmdOrCtrl+P', click: send('print') },
-        { label: '关闭文档', accelerator: 'CmdOrCtrl+Shift+W', click: send('close') },
-        { role: 'close', label: '关闭窗口' },
-        { type: 'separator' }, { role: 'quit', label: '退出' }
-      ] },
-      { label: '编辑', submenu: [{ role: 'copy', label: '复制' }, { role: 'selectAll', label: '全选' },
-        { label: '在 PDF 中查找', accelerator: 'CmdOrCtrl+F', click: send('find') }] },
-      { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'togglefullscreen', label: '全屏' }] },
-      ...(process.platform === 'win32' ? [{ label: '帮助', submenu: [updateItem] }] : [])
-    ]));
+    language = readLanguage();
+    installMenu();
     createWindow();
     for (const file of process.argv.slice(app.isPackaged ? 1 : 2)) void openFromSystem(file);
     app.on('activate', () => { if (!window) createWindow(); });

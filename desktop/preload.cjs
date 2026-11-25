@@ -32,5 +32,7 @@ contextBridge.exposeInMainWorld('desktop', {
   onUpdatePrompt: callback => ipcRenderer.on('update-prompt', (_event, prompt) => callback(prompt)),
   onUpdateProgress: callback => ipcRenderer.on('update-progress', (_event, progress) => callback(progress)),
   onMenu: callback => ipcRenderer.on('menu', (_event, command) => callback(command)),
+  getLanguage: () => invoke('get-language'),
+  onLanguage: callback => ipcRenderer.on('language', (_event, language) => callback(language)),
   ready: () => invoke('ready')
 });
