@@ -1134,7 +1134,9 @@ async function editReaderPages(edit: PageEdit, targetPage: number, getFiles?: ()
     if (getFiles) {
       files = await getFiles();
       if (!files.length) return;
-      if (files.some(file => file.kind !== 'pdf')) throw new Error('请仅拖入 PDF 文件。');
+      if (files.some(file => file.kind !== 'pdf' && file.kind !== 'image')) {
+        throw new Error('仅支持插入 PDF、JPG、JPEG 或 PNG 文件。');
+      }
     }
     status('正在更新页面…');
     preview = await desktop.editPages(previous.file.id, { ...edit, ids: files.map(file => file.id) });

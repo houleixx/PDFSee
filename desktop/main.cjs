@@ -389,7 +389,11 @@ handle('edit-pages', async (owner, id, edit) => {
   const { action, ids } = edit ?? {};
   if (!['insert', 'move', 'delete'].includes(action) || !Array.isArray(ids) || ids.length > 300 ||
       (action === 'insert' ? !ids.length : ids.length)) throw new Error('页面操作无效。');
-  const files = [source, ...ids.map(id => getFile(id, owner, 'pdf'))];
+  const attachments = ids.map(id => getFile(id, owner));
+  if (attachments.some(file => file.kind !== 'pdf' && file.kind !== 'image')) {
+    throw new Error('仅支持插入 PDF、JPG、JPEG 或 PNG 文件。');
+  }
+  const files = [source, ...attachments];
   const sources = [...new Set(files.flatMap(file => file.sources ?? [file.path]))];
   const temporary = await mkdtemp(join(app.getPath('temp'), 'pdfsee-pages-'));
   try {

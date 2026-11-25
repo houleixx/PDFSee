@@ -76,6 +76,10 @@ async function editPages(paths, { action, page, gap }) {
   }
   await append(source, indices.slice(0, gap));
   for (const path of paths.slice(1)) {
+    if (/^\.(?:jpe?g|png)$/i.test(extname(path))) {
+      await appendImagePage(output, path, 'original');
+      continue;
+    }
     const attachment = await loadPdf(path);
     const pages = attachment.getPageIndices();
     if (!pages.length) throw new Error('插入的 PDF 没有可用页面。');
@@ -96,22 +100,29 @@ async function mergeFiles(paths) {
   return output.save();
 }
 
+async function appendImagePage(output, path, paper) {
+  const data = await readFile(path);
+  let image;
+  try {
+    image = extname(path).toLowerCase() === '.png'
+      ? await output.embedPng(data) : await output.embedJpg(data);
+  } catch (error) {
+    throw new Error('无法读取图片。请确认文件完整且格式正确。', { cause: error });
+  }
+  const sizes = { a4: [595.28, 841.89], letter: [612, 792] };
+  const original = image.scale(Math.min(0.75, 14400 / Math.max(image.width, image.height)));
+  const [width, height] = sizes[paper] ?? [original.width, original.height];
+  const margin = paper === 'original' ? 0 : 24;
+  const scaled = image.scaleToFit(width - margin * 2, height - margin * 2);
+  output.addPage([width, height]).drawImage(image, {
+    ...scaled, x: (width - scaled.width) / 2, y: (height - scaled.height) / 2
+  });
+}
+
 async function imagesToPdf(paths, paper) {
   const { PDFDocument } = require('pdf-lib');
   const output = await PDFDocument.create();
-  const sizes = { a4: [595.28, 841.89], letter: [612, 792] };
-  for (const path of paths) {
-    const data = await readFile(path);
-    const image = extname(path).toLowerCase() === '.png'
-      ? await output.embedPng(data) : await output.embedJpg(data);
-    const original = image.scale(Math.min(0.75, 14400 / Math.max(image.width, image.height)));
-    const [width, height] = sizes[paper] ?? [original.width, original.height];
-    const margin = paper === 'original' ? 0 : 24;
-    const scaled = image.scaleToFit(width - margin * 2, height - margin * 2);
-    output.addPage([width, height]).drawImage(image, {
-      ...scaled, x: (width - scaled.width) / 2, y: (height - scaled.height) / 2
-    });
-  }
+  for (const path of paths) await appendImagePage(output, path, paper);
   return output.save();
 }
 
