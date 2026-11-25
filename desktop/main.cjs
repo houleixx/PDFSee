@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, screen, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, net, protocol, screen, shell, utilityProcess } = require('electron');
 const { readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { copyFile, mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
 const { basename, dirname, extname, join, resolve, sep } = require('node:path');
@@ -62,6 +62,36 @@ function setLanguage(next) {
   }
   installMenu();
 }
+
+const appearanceLabels = { system: '跟随系统', light: '浅色', dark: '深色' };
+const appearancePath = () => join(app.getPath('userData'), 'appearance');
+const windowBackground = () => nativeTheme.shouldUseDarkColors ? '#18191b' : '#fafaf9';
+
+function readAppearance() {
+  try {
+    const saved = readFileSync(appearancePath(), 'utf8').trim();
+    if (Object.hasOwn(appearanceLabels, saved)) return saved;
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn(error.message);
+  }
+  return 'system';
+}
+
+function setAppearance(next) {
+  try {
+    const path = appearancePath();
+    writeFileSync(`${path}.tmp`, next, 'utf8');
+    renameSync(`${path}.tmp`, path);
+    nativeTheme.themeSource = next;
+  } catch (error) {
+    console.warn(error.message);
+    void dialog.showMessageBox({
+      type: 'error', message: t('无法保存外观偏好。'), buttons: [t('确定')]
+    });
+  }
+  installMenu();
+}
+
 let busy = false;
 let imageExport = null;
 let updateProgress = null;
@@ -535,7 +565,7 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width, height, minWidth: 740, minHeight: 570,
     ...restoreWindowPosition(positionPath, width, height),
-    title: 'PDFSee', backgroundColor: '#fafaf9',
+    title: 'PDFSee', backgroundColor: windowBackground(),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
   });
   window = mainWindow;
@@ -608,6 +638,13 @@ function installMenu() {
     ] },
     { label: t('编辑'), submenu: [{ role: 'copy', label: t('复制') }, { role: 'selectAll', label: t('全选') },
       { label: t('在 PDF 中查找'), accelerator: 'CmdOrCtrl+F', click: send('find') }] },
+    { label: t('视图'), submenu: [{
+      label: t('外观'),
+      submenu: Object.entries(appearanceLabels).map(([value, label]) => ({
+        label: t(label), type: 'radio', checked: nativeTheme.themeSource === value,
+        click: () => setAppearance(value)
+      }))
+    }] },
     { label: t('窗口'), submenu: [{ role: 'minimize', label: t('最小化') }, { role: 'togglefullscreen', label: t('全屏') }] },
     ...(process.platform === 'win32' ? [{ label: t('帮助'), submenu: [updateItem] }] : [])
   ]));
@@ -641,6 +678,8 @@ if (!app.requestSingleInstanceLock()) {
       }
     });
     language = readLanguage();
+    nativeTheme.themeSource = readAppearance();
+    nativeTheme.on('updated', () => window?.setBackgroundColor(windowBackground()));
     installMenu();
     createWindow();
     for (const file of process.argv.slice(app.isPackaged ? 1 : 2)) void openFromSystem(file);

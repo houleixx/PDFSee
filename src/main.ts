@@ -263,6 +263,7 @@ function setMode(next: Mode, format = pdfFormat) {
     if (mode === 'raster') {
       refreshSection();
       refreshPdfFormat();
+      showToolSelectionStatus();
       return;
     }
   }
@@ -271,7 +272,11 @@ function setMode(next: Mode, format = pdfFormat) {
   for (const file of previous) releaseUnused(file);
   mode = next;
   refreshSection();
-  if (mode === 'read') return;
+  if (mode === 'read') {
+    if (current && doc) showDocumentStatus(current, doc.numPages);
+    else status('就绪');
+    return;
+  }
   const tool = tools[mode];
   byId('tool-icon').replaceChildren(icon(tool.icon));
   localizedText(byId('tool-title'), tool.title);
@@ -289,6 +294,7 @@ function setMode(next: Mode, format = pdfFormat) {
   (byId('tool-form') as HTMLFormElement).reset();
   if (mode === 'raster') refreshPdfFormat();
   refreshFiles();
+  showToolSelectionStatus();
 }
 
 function clearReader(preserveSearch = false) {
@@ -355,6 +361,10 @@ function holdPreviewUntilRendered() {
   removePreviewSnapshot = remove;
   bus.on('pagerendered', finish);
   timeout = window.setTimeout(remove, 4000);
+}
+
+function showDocumentStatus(file: FileInfo, pageCount: number) {
+  status(`${file.name} · ${pageCount} 页 · ${sizeText(file.size)}`);
 }
 
 async function openDocument(file: FileInfo, page?: number) {
@@ -434,7 +444,7 @@ async function openDocument(file: FileInfo, page?: number) {
     byId('total').textContent = `/ ${loaded.numPages}`;
     makeThumbnails(loaded);
     if (!byId('outline').hidden) void renderOutline().catch(errorStatus);
-    status(`${file.name} · ${loaded.numPages} 页 · ${sizeText(file.size)}`);
+    if (mode === 'read') showDocumentStatus(file, loaded.numPages);
   } catch (error) {
     if (version !== loadVersion) return;
     removePreviewSnapshot?.();
@@ -934,6 +944,12 @@ function listAction(label: string, glyph: string, action: () => void, disabled =
   return control;
 }
 
+function showToolSelectionStatus() {
+  const count = selections.length;
+  if (mode === 'merge' && count < 2) status(`已添加 ${count} 份 PDF，至少需要 2 份。`);
+  else status(count ? `已选择 ${count} 个文件` : '尚未添加文件。');
+}
+
 function refreshFiles() {
   if (mode === 'read') return;
   const list = byId('file-list');
@@ -960,6 +976,7 @@ function refreshFiles() {
       selections.splice(index, 1);
       releaseUnused(file);
       refreshFiles();
+      showToolSelectionStatus();
     }, running));
     list.append(item);
   });
@@ -987,7 +1004,7 @@ function addFiles(files: FileInfo[], kind: Kind, multi: boolean) {
   selections = multi ? [...previous, ...matching].slice(0, 300) : matching.slice(0, 1);
   for (const file of [...previous, ...files]) releaseUnused(file);
   refreshFiles();
-  status(`已选择 ${selections.length} 个文件`);
+  showToolSelectionStatus();
 }
 
 async function pickPdf() {
