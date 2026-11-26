@@ -127,7 +127,7 @@ kbd { margin-top: 10px; color: var(--muted); font: 12px "SFMono-Regular", Consol
 .quick { width: min(100%, 790px); }
 .quick h2 { margin: 0 0 9px; font-size: 13px; }
 .quick-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
-.quick-list button { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--control); text-align: left; }
+.quick-list button { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--control); text-align: left; }
 .quick-list button:hover { border-color: var(--drop-border); background: var(--hover); }
 .quick-list button .icon:first-child { color: var(--accent); }
 .quick-list button .icon:last-child { margin-left: auto; color: var(--muted); font-size: 13px; }
