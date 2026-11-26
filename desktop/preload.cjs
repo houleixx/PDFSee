@@ -20,7 +20,6 @@ contextBridge.exposeInMainWorld('desktop', {
   editPages: (id, edit) => invoke('edit-pages', id, edit),
   stagePdf: (id, bytes, edits) => invoke('stage-pdf', id, bytes, edits),
   saveReaderPdf: (base, id, bytes, asCopy, others) => invoke('save-reader-pdf', base, id, bytes, asCopy, others),
-  confirmDocumentClose: name => invoke('confirm-document-close', name),
   finishWindowClose: approved => invoke('finish-window-close', approved),
   execute: job => invoke('execute', job),
   saveImage: (name, bytes) => invoke('save-image', name, bytes),

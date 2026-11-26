@@ -28,6 +28,7 @@ type UpdateProgress = { version: string; phase: 'download' | 'install'; percent:
 type UpdatePrompt = {
   id: string;
   type: 'info' | 'error';
+  icon?: 'undo-2';
   message: string;
   detail?: string;
   buttons?: string[];
@@ -48,7 +49,6 @@ type Bridge = {
   editPages(id: string, edit: PageEdit & { ids: string[] }): Promise<FileInfo>;
   stagePdf(id: string, bytes: Uint8Array, edits: PdfNoteEdit[]): Promise<FileInfo>;
   saveReaderPdf(base: string, id: string, bytes: Uint8Array | null, asCopy: boolean, others: string[]): Promise<{ file: FileInfo; output: Output } | null>;
-  confirmDocumentClose(name: string): Promise<'save' | 'copy' | 'discard' | 'cancel'>;
   finishWindowClose(approved: boolean): Promise<void>;
   execute(job: ToolJob): Promise<ToolResult | null>;
   saveImage(name: string, data: Uint8Array): Promise<Output | null>;
@@ -548,7 +548,13 @@ async function saveTab(tab: DocumentTab, asCopy: boolean) {
 
 async function confirmClose(tab: DocumentTab) {
   if (!tab.dirty && !(tab === activeTab && hasLiveChanges())) return true;
-  const choice = await desktop.confirmDocumentClose(tab.base.name);
+  const prompt = byId<HTMLDialogElement>('close-document-dialog');
+  byId('close-document-name').textContent = tab.base.name;
+  prompt.returnValue = 'cancel';
+  const choice = await new Promise<string>(resolve => {
+    prompt.showModal();
+    prompt.addEventListener('close', () => resolve(prompt.returnValue), { once: true });
+  });
   if (choice === 'cancel') return false;
   if (choice === 'discard') return true;
   return saveTab(tab, choice === 'copy');
@@ -1537,7 +1543,7 @@ async function showPageMenu(page: number) {
   await editReaderPages({ action: 'insert', gap }, gap + 1, () => desktop.pick('pdf', true));
 }
 
-function undoEdit() {
+async function undoEdit() {
   if (tabBusy() || mode !== 'read' || !activeTab || !doc || removePreviewSnapshot) return;
   finishNote();
   if (annotationCanUndo && annotationEditor) {
@@ -1547,16 +1553,22 @@ function undoEdit() {
   }
   const previous = pageHistory.at(-1);
   if (!previous) return;
-  // The earlier PDF may contain a different set of pages and annotations.
-  if ((hasLiveChanges() || activeTab.file.id !== previous.resultId) &&
-      !window.confirm(translate('撤销页面编辑会恢复到上一个文档版本。继续吗？'))) return;
+  const tab = activeTab;
+  if (hasLiveChanges() || tab.file.id !== previous.resultId) {
+    const choice = await showAppPrompt({
+      type: 'info', icon: 'undo-2', message: '撤销页面编辑？',
+      detail: '撤销页面编辑会恢复到上一个文档版本。继续吗？',
+      buttons: ['取消', '撤销'], defaultId: 0, cancelId: 0
+    });
+    if (choice !== 1 || activeTab !== tab || pageHistory.at(-1) !== previous || tabBusy() || mode !== 'read') return;
+  }
   pageHistory.pop();
   activeTab.file = previous.file;
   activeTab.dirty = previous.dirty;
   void loadDocument(previous.file, previous.page, readPosition(), { keepPreview: true });
 }
 
-click('undo-edit', undoEdit);
+click('undo-edit', () => void undoEdit().catch(errorStatus));
 document.addEventListener('keydown', event => {
   if (event.isComposing || event.shiftKey || event.altKey || !(event.metaKey || event.ctrlKey) ||
       event.key.toLowerCase() !== 'z' || mode !== 'read' ||
@@ -1564,7 +1576,7 @@ document.addEventListener('keydown', event => {
   if (button('undo-edit').disabled) return;
   event.preventDefault();
   event.stopPropagation();
-  undoEdit();
+  void undoEdit().catch(errorStatus);
 }, true);
 
 function saveCurrent(asCopy: boolean) {
@@ -1681,6 +1693,7 @@ function renderNoteState(page: number, id: string) {
       localizedAttribute(local, 'aria-label', '查看便签');
       const image = document.createElement('img');
       image.src = noteIconUrl;
+      image.className = 'pdfsee-note-icon';
       image.alt = '';
       image.draggable = false;
       local.append(image);
@@ -1690,8 +1703,6 @@ function renderNoteState(page: number, id: string) {
     const [x1, y1, x2, y2] = view.viewport.convertToViewportRectangle([draft.x, draft.y - 20, draft.x + 20, draft.y]);
     element.style.left = `${Math.min(x1, x2)}px`;
     element.style.top = `${Math.min(y1, y2)}px`;
-    element.style.width = `${Math.abs(x2 - x1)}px`;
-    element.style.height = `${Math.abs(y2 - y1)}px`;
   } else if (element?.classList.contains('pdfsee-draft-note')) {
     element.remove();
     return;
@@ -2043,30 +2054,37 @@ document.addEventListener('drop', event => {
 let systemOpen: Promise<void> = Promise.resolve();
 desktop.onFile(file => { systemOpen = systemOpen.then(() => openDocument(file)).catch(errorStatus); });
 desktop.onError(errorStatus);
+let appPromptQueue: Promise<unknown> = Promise.resolve();
+function showAppPrompt(prompt: Omit<UpdatePrompt, 'id'>): Promise<number> {
+  const decision = appPromptQueue.then(() => new Promise<number>(resolve => {
+    const dialog = byId<HTMLDialogElement>('update-dialog');
+    const detail = byId('update-detail');
+    localizedText(byId('update-title'), prompt.message);
+    localizedText(detail, prompt.detail ?? '');
+    detail.hidden = !prompt.detail;
+    const labels = prompt.buttons ?? ['确定'];
+    const primary = prompt.defaultId ?? 0;
+    const order = labels.map((_, index) => index).reverse();
+    byId('update-icon').className = `icon icon-${prompt.icon ?? (prompt.type === 'error' ? 'circle-alert' : prompt.buttons ? 'arrow-down-to-line' : 'info')}`;
+    const actions = order.map(index => {
+      const action = document.createElement('button');
+      action.className = index === primary ? 'button primary' : index === 2 ? 'update-ignore' : 'button secondary';
+      action.value = String(index);
+      localizedText(action, labels[index]);
+      action.autofocus = index === primary;
+      return action;
+    });
+    byId('update-actions').replaceChildren(...actions);
+    dialog.returnValue = String(prompt.cancelId ?? 0);
+    dialog.showModal();
+    dialog.addEventListener('close', () => resolve(Number(dialog.returnValue)), { once: true });
+  }));
+  appPromptQueue = decision.catch(() => {});
+  return decision;
+}
+
 desktop.onUpdatePrompt(prompt => {
-  const dialog = byId<HTMLDialogElement>('update-dialog');
-  const detail = byId('update-detail');
-  localizedText(byId('update-title'), prompt.message);
-  localizedText(detail, prompt.detail ?? '');
-  detail.hidden = !prompt.detail;
-  const labels = prompt.buttons ?? ['确定'];
-  const primary = prompt.defaultId ?? 0;
-  const order = labels.map((_, index) => index).reverse();
-  byId('update-icon').className = `icon icon-${prompt.type === 'error' ? 'circle-alert' : prompt.buttons ? 'arrow-down-to-line' : 'info'}`;
-  const actions = order.map(index => {
-    const action = document.createElement('button');
-    action.className = index === primary ? 'button primary' : index === 2 ? 'update-ignore' : 'button secondary';
-    action.value = String(index);
-    localizedText(action, labels[index]);
-    action.autofocus = index === primary;
-    return action;
-  });
-  byId('update-actions').replaceChildren(...actions);
-  dialog.returnValue = String(prompt.cancelId ?? 0);
-  dialog.onclose = () => {
-    void desktop.answerUpdatePrompt(prompt.id, Number(dialog.returnValue)).catch(errorStatus);
-  };
-  if (!dialog.open) dialog.showModal();
+  void showAppPrompt(prompt).then(choice => desktop.answerUpdatePrompt(prompt.id, choice)).catch(errorStatus);
 });
 desktop.onUpdateProgress(progress => {
   byId('update-progress').hidden = !progress;

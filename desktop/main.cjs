@@ -57,8 +57,8 @@ function setLanguage(next) {
     window?.webContents.send('language', next);
   } catch (error) {
     console.warn(error.message);
-    void dialog.showMessageBox({
-      type: 'error', message: t('无法保存语言偏好。'), buttons: [t('确定')]
+    void showWindowPrompt({
+      type: 'error', message: '无法保存语言偏好。'
     });
   }
   installMenu();
@@ -86,8 +86,8 @@ function setAppearance(next) {
     nativeTheme.themeSource = next;
   } catch (error) {
     console.warn(error.message);
-    void dialog.showMessageBox({
-      type: 'error', message: t('无法保存外观偏好。'), buttons: [t('确定')]
+    void showWindowPrompt({
+      type: 'error', message: '无法保存外观偏好。'
     });
   }
   installMenu();
@@ -97,10 +97,11 @@ let busy = false;
 let imageExport = null;
 let updateProgress = null;
 let updatePrompt = null;
+const windowPrompts = [];
 let startupUpdateChecked = false;
 let startupUpdateTimer;
 const checkForUpdates = createUpdater({
-  app, show: showUpdatePrompt, shell, net, getWindow: () => window,
+  app, show: showWindowPrompt, shell, net, getWindow: () => window,
   onProgress: progress => {
     updateProgress = progress;
     if (window && ready.has(window.webContents.id)) window.webContents.send('update-progress', progress);
@@ -113,21 +114,34 @@ const checkForUpdates = createUpdater({
   endInstall: () => { busy = false; }
 });
 
-function showUpdatePrompt(options) {
+function showWindowPrompt(options) {
   const target = window?.webContents;
   if (!target || target.isDestroyed()) return Promise.resolve(options.cancelId ?? 0);
   return new Promise(resolve => {
-    const prompt = { id: randomUUID(), ...options };
-    updatePrompt = { owner: target.id, prompt, resolve };
-    if (ready.has(target.id)) target.send('update-prompt', prompt);
+    windowPrompts.push({ owner: target.id, prompt: { id: randomUUID(), ...options }, resolve });
+    if (!updatePrompt) sendNextWindowPrompt();
   });
 }
 
+function sendNextWindowPrompt() {
+  updatePrompt = windowPrompts.shift() ?? null;
+  if (updatePrompt && ready.has(updatePrompt.owner)) {
+    window?.webContents.send('update-prompt', updatePrompt.prompt);
+  }
+}
+
 function finishUpdatePrompt(owner, choice) {
+  if (choice === undefined) {
+    for (const entry of [updatePrompt, ...windowPrompts]) {
+      if (entry?.owner === owner) entry.resolve(entry.prompt.cancelId ?? 0);
+    }
+    updatePrompt = null;
+    windowPrompts.length = 0;
+    return;
+  }
   if (updatePrompt?.owner !== owner) return;
-  const { prompt, resolve } = updatePrompt;
-  updatePrompt = null;
-  resolve(choice ?? prompt.cancelId ?? 0);
+  updatePrompt.resolve(choice);
+  sendNextWindowPrompt();
 }
 
 async function cancelImages() {
@@ -255,10 +269,10 @@ async function saveAtomically(path, write) {
 
 async function offerOfficeDownload() {
   const target = window;
-  const { response } = await dialog.showMessageBox(target, {
-    type: 'info', message: t('文档转 PDF 需要 LibreOffice'),
-    detail: t('PDFSee 可以下载适用于这台电脑的官方安装包。下载后安装 LibreOffice，再回来转换文档。'),
-    buttons: [t('下载安装包'), t('稍后')], defaultId: 0, cancelId: 1
+  const response = await showWindowPrompt({
+    type: 'info', message: '文档转 PDF 需要 LibreOffice',
+    detail: 'PDFSee 可以下载适用于这台电脑的官方安装包。下载后安装 LibreOffice，再回来转换文档。',
+    buttons: ['下载安装包', '稍后'], defaultId: 0, cancelId: 1
   });
   if (response !== 0 || target.isDestroyed()) return { message: '安装 LibreOffice 后即可转换文档。' };
   const fetch = (url, options) => net.fetch(url, options);
@@ -458,14 +472,6 @@ handle('save-reader-pdf', async (owner, baseId, currentId, bytes, asCopy, otherI
   const file = await register(path, owner);
   outputs.add(path);
   return { file, output: { name: basename(path), location: path } };
-});
-
-handle('confirm-document-close', async (owner, name) => {
-  const { response } = await dialog.showMessageBox(window, {
-    type: 'question', message: t('PDF 有未保存的改动'), detail: name,
-    buttons: [t('保存'), t('另存为…'), t('放弃改动'), t('取消')], defaultId: 0, cancelId: 3
-  });
-  return ['save', 'copy', 'discard', 'cancel'][response];
 });
 
 handle('finish-window-close', (_owner, approved) => {
@@ -687,7 +693,9 @@ function installMenu() {
   };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
-      { role: 'about', label: t('关于 PDFSee') }, updateItem, languageItem, { type: 'separator' },
+      { label: t('关于 PDFSee'), click: () => void showWindowPrompt({
+        type: 'info', message: '关于 PDFSee', detail: app.getVersion()
+      }) }, updateItem, languageItem, { type: 'separator' },
       { role: 'services', label: t('服务') }, { type: 'separator' },
       { role: 'hide', label: t('隐藏 PDFSee') }, { role: 'hideOthers', label: t('隐藏其他应用') }, { role: 'unhide', label: t('显示全部') },
       { type: 'separator' }, { role: 'quit', label: t('退出 PDFSee') }

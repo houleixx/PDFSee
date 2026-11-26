@@ -167,14 +167,32 @@
   <div id="print-pages" aria-hidden="true"></div>
   <dialog id="update-dialog" aria-labelledby="update-title" aria-describedby="update-detail">
     <form method="dialog">
-      <div class="update-heading">
-        <span class="update-icon" aria-hidden="true"><i id="update-icon" class="icon icon-arrow-down-to-line"></i></span>
+      <div class="dialog-heading">
+        <span class="dialog-icon" aria-hidden="true"><i id="update-icon" class="icon icon-arrow-down-to-line"></i></span>
         <div>
           <h2 id="update-title"></h2>
           <p id="update-detail"></p>
         </div>
       </div>
       <div class="dialog-actions" id="update-actions"></div>
+    </form>
+  </dialog>
+  <dialog id="close-document-dialog" aria-labelledby="close-document-title" aria-describedby="close-document-name close-document-detail">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <span class="dialog-icon" aria-hidden="true"><i class="icon icon-file-text"></i></span>
+        <div class="close-document-message">
+          <h2 id="close-document-title">保存对 PDF 的改动？</h2>
+          <p id="close-document-name"></p>
+          <p id="close-document-detail">这份文档有未保存的改动。</p>
+        </div>
+      </div>
+      <div class="dialog-actions close-document-actions">
+        <button class="close-document-discard" value="discard">放弃改动</button>
+        <button class="button secondary" value="cancel">取消</button>
+        <button class="button secondary" value="copy">另存为…</button>
+        <button class="button primary" value="save" autofocus>保存</button>
+      </div>
     </form>
   </dialog>
   <dialog id="password-dialog">

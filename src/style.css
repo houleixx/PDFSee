@@ -55,7 +55,11 @@ body { margin: 0; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, button:focus-visible::before, button:focus-visible::after,
+button:focus-visible .swatch { outline: none !important; }
+button:focus-visible { background-color: var(--hover); }
+button.primary:focus-visible { background-color: var(--accent-hover); }
 button .icon { flex: none; }
 .icon { font-size: 17px; vertical-align: -.12em; }
 .shell { display: grid; grid-template-columns: 200px minmax(0, 1fr); height: 100dvh; }
@@ -97,7 +101,6 @@ button .icon { flex: none; }
 .document-tab-extension { flex: none; }
 .document-tab-close.square { flex: none; width: 24px; height: 24px; }
 .document-tab-close .icon { font-size: 13px; }
-.document-tab :focus-visible { outline-offset: -1px; }
 .document-tab [data-dirty] {
   flex: none; width: 6px; height: 6px; margin-inline-end: 3px; border-radius: 50%; background: var(--accent);
 }
@@ -244,8 +247,8 @@ dialog input { width: 100%; }
   padding: 24px;
   box-shadow: 0 20px 56px #141a2033;
 }
-.update-heading { display: flex; align-items: flex-start; gap: 14px; }
-.update-icon {
+.dialog-heading { display: flex; align-items: flex-start; gap: 14px; }
+.dialog-icon {
   display: grid;
   place-items: center;
   flex: none;
@@ -268,8 +271,23 @@ dialog input { width: 100%; }
   color: var(--muted);
 }
 .update-ignore:hover { color: var(--ink); text-decoration: underline; }
-#update-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-#update-dialog button.primary:focus-visible { outline: none; background: var(--accent-hover); }
+#close-document-dialog {
+  width: min(508px, calc(100% - 32px));
+  padding: 22px;
+  box-shadow: 0 20px 56px #141a2033;
+}
+.close-document-message { min-width: 0; overflow-wrap: anywhere; }
+#close-document-title { margin: 0 0 5px; }
+#close-document-name { color: var(--ink); font-weight: 600; }
+#close-document-detail { margin-top: 3px; font-size: 13px; }
+.close-document-actions { margin-top: 22px; flex-wrap: wrap; }
+.close-document-actions .button.primary { min-width: 75px; }
+.close-document-discard {
+  min-height: 32px; margin-inline-end: auto; padding: 0 8px;
+  border: 0; border-radius: 6px; color: var(--error); background: transparent;
+  font-size: 13px;
+}
+.close-document-discard:hover { background: var(--accent-tint); }
 @media print { #update-dialog, #update-dialog::backdrop { display: none; } }
 @media (max-width: 900px) {
   .shell { grid-template-columns: 172px minmax(0, 1fr); }
@@ -353,7 +371,13 @@ dialog input { width: 100%; }
 #note-actions .square { width: 26px; height: 26px; }
 #note-actions .icon { font-size: 15px; }
 .popupAnnotation[data-note-popover] { display: none !important; }
-.annotationLayer .textAnnotation .pdfsee-note-icon { object-fit: contain; }
+#viewer .textAnnotation:has(> .pdfsee-note-icon) {
+  width: 30px !important;
+  height: 30px !important;
+}
+#viewer .textAnnotation > .pdfsee-note-icon {
+  position: absolute; inset: 0; margin: auto; width: 29px; height: 29px; object-fit: contain;
+}
 .textAnnotation[role="button"] { cursor: pointer; }
 .textAnnotation[data-movable], .textAnnotation[data-movable] img { cursor: grab; }
 .textAnnotation[data-dragging], .textAnnotation[data-dragging] img { cursor: grabbing; }
@@ -361,4 +385,3 @@ dialog input { width: 100%; }
 .pdfsee-draft-note {
   position: absolute; z-index: 5; padding: 0; border: 0; background: transparent;
 }
-.pdfsee-draft-note img { display: block; width: 100%; height: 100%; object-fit: contain; }
