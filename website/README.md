@@ -27,12 +27,13 @@ website/
     favicon-4236d9f1.png        # 96x96 图标
     social-preview-80a5182d.jpg # 社交分享预览图（1200x630）
     hero-app-preview-1158e04e.webp  # Hero 区域展示图（1200x1006）
-    feature-read-pdf-5578ead3.webp  # 功能1：阅读 PDF（1080x720）
-    feature-merge-pdf-019e91a8.webp   # 功能2：合并 PDF（1080x729）
-    feature-split-pdf-24a148d2.webp   # 功能3：拆分 PDF（1080x900）
-    feature-extract-pages-468a6676.webp # 功能4：提取页面（1080x777）
-    feature-export-pdf-15b1ca38.webp   # 功能5：从 PDF 导出（1080x720）
-    feature-convert-pdf-4f926b9c.webp   # 功能6：生成 PDF（1080x729）
+    feature-read-pdf-5578ead3.webp  # 功能1：多标签阅读（1080x720）
+    feature-annotate-pdf-02b06360.webp  # 功能2：彩色高亮与便签批注（1080x720）
+    feature-merge-pdf-019e91a8.webp   # 功能3：合并 PDF（1080x729）
+    feature-split-pdf-24a148d2.webp   # 功能4：拆分 PDF（1080x900）
+    feature-extract-pages-468a6676.webp # 功能5：提取页面（1080x777）
+    feature-export-pdf-15b1ca38.webp   # 功能6：从 PDF 导出（1080x720）
+    feature-convert-pdf-4f926b9c.webp   # 功能7：生成 PDF（1080x729）
   robots.txt
   sitemap.xml
   _headers                      # Cloudflare 缓存头
