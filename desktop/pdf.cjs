@@ -126,4 +126,96 @@ async function imagesToPdf(paths, paper) {
   return output.save();
 }
 
-module.exports = { parsePages, loadPdf, copyPages, mergeFiles, imagesToPdf, editPages };
+async function loadPdfForNotes(bytes) {
+  const { PDFDocument, EncryptedPDFError } = require('pdf-lib');
+  try {
+    return await PDFDocument.load(bytes, { updateMetadata: false });
+  } catch (error) {
+    if (error instanceof EncryptedPDFError) throw new Error('此 PDF 已加密，无法修改便签。');
+    throw error;
+  }
+}
+
+function addPdfNote(document, { page, x, y, text }) {
+  const { PDFHexString } = require('pdf-lib');
+  const message = typeof text === 'string' ? text.trim() : '';
+  if (!Number.isInteger(page) || page < 1 || page > document.getPageCount() ||
+      !Number.isFinite(x) || !Number.isFinite(y) || !message || message.length > 4000) {
+    throw new Error('便签内容或位置无效。');
+  }
+  const target = document.getPage(page - 1);
+  const { context } = document;
+  const note = context.obj({
+    Type: 'Annot', Subtype: 'Text', Name: 'Comment', Rect: [x, y - 20, x + 20, y],
+    Contents: PDFHexString.fromText(message), Open: false, F: 24, C: [1, 0.8, 0.2]
+  });
+  target.node.addAnnot(context.register(note));
+}
+
+function findPdfNote(document, page, id) {
+  const { PDFDict, PDFName, PDFRef } = require('pdf-lib');
+  const match = typeof id === 'string' && /^(\d+)R(\d+)?$/.exec(id);
+  if (!match || !Number.isInteger(page) || page < 1 || page > document.getPageCount()) {
+    throw new Error('找不到要操作的便签。');
+  }
+  const target = document.getPage(page - 1);
+  const refs = target.node.Annots()?.asArray() ?? [];
+  const ref = PDFRef.of(Number(match[1]), Number(match[2] ?? 0));
+  const note = refs.includes(ref) ? document.context.lookup(ref) : null;
+  if (!(note instanceof PDFDict) || note.get(PDFName.of('Subtype')) !== PDFName.of('Text')) {
+    throw new Error('找不到要操作的便签。');
+  }
+  return { target, refs, ref, note };
+}
+
+function updatePdfNote(document, { page, id, text }) {
+  const { PDFHexString, PDFName, PDFString } = require('pdf-lib');
+  const { note } = findPdfNote(document, page, id);
+  const message = typeof text === 'string' ? text.trim() : '';
+  if (!message || message.length > 4000) throw new Error('便签内容或位置无效。');
+  note.set(PDFName.of('Contents'), PDFHexString.fromText(message));
+  note.delete(PDFName.of('RC'));
+  note.set(PDFName.of('M'), PDFString.fromDate(new Date()));
+}
+
+function movePdfNote(document, { page, id, dx, dy }) {
+  const { PDFArray, PDFName, PDFNumber, PDFString } = require('pdf-lib');
+  const { note, target } = findPdfNote(document, page, id);
+  const key = PDFName.of('Rect');
+  const rect = note.lookupMaybe(key, PDFArray)?.asArray();
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || rect?.length !== 4 ||
+      !rect.every(value => value instanceof PDFNumber)) throw new Error('便签内容或位置无效。');
+  const [x1, y1, x2, y2] = rect.map(value => value.asNumber());
+  const { x, y, width, height } = target.getCropBox();
+  const shiftX = Math.max(x - Math.min(x1, x2), Math.min(dx, x + width - Math.max(x1, x2)));
+  const shiftY = Math.max(y - Math.min(y1, y2), Math.min(dy, y + height - Math.max(y1, y2)));
+  note.set(key, document.context.obj([x1 + shiftX, y1 + shiftY, x2 + shiftX, y2 + shiftY]));
+  note.set(PDFName.of('M'), PDFString.fromDate(new Date()));
+}
+
+function removePdfNote(document, { page, id }) {
+  const { PDFDict, PDFName } = require('pdf-lib');
+  const { target, refs, ref, note } = findPdfNote(document, page, id);
+  const popup = note.get(PDFName.of('Popup'));
+  if (refs.includes(popup) && document.context.lookupMaybe(popup, PDFDict)?.get(PDFName.of('Subtype')) === PDFName.of('Popup')) {
+    target.node.removeAnnot(popup);
+  }
+  target.node.removeAnnot(ref);
+}
+
+async function editPdfNotes(bytes, edits) {
+  if (!Array.isArray(edits)) throw new Error('无效的便签操作。');
+  if (!edits.length) return bytes;
+  const document = await loadPdfForNotes(bytes);
+  const operations = new Map([
+    ['add', addPdfNote], ['update', updatePdfNote], ['move', movePdfNote], ['remove', removePdfNote]
+  ]);
+  for (const edit of edits) {
+    const apply = operations.get(edit?.action);
+    if (!apply) throw new Error('无效的便签操作。');
+    apply(document, edit);
+  }
+  return document.save();
+}
+
+module.exports = { parsePages, loadPdf, copyPages, mergeFiles, imagesToPdf, editPages, editPdfNotes };

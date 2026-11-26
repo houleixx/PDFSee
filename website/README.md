@@ -25,14 +25,14 @@ website/
     language-d8e2f1a3.js        # 语言检测脚本
     brand-mark-e2934915.png     # 品牌图标（导航和页脚）
     favicon-4236d9f1.png        # 96x96 图标
-    social-preview-4da92a2c.jpg # 社交分享预览图（1200x630）
-    hero-app-preview-cc82d580.webp  # Hero 区域展示图（1200x1006）
-    feature-read-pdf-e2c49f43.webp  # 功能1：阅读 PDF（1080x720）
-    feature-merge-pdf-e79c04a5.webp   # 功能2：合并 PDF（1080x729）
-    feature-split-pdf-6cd6f516.webp   # 功能3：拆分 PDF（1080x900）
-    feature-extract-pages-a70b2f69.webp # 功能4：提取页面（1080x777）
-    feature-export-pdf-be06d70e.webp   # 功能5：从 PDF 导出（1080x720）
-    feature-convert-pdf-585df8f7.webp   # 功能6：生成 PDF（1080x729）
+    social-preview-80a5182d.jpg # 社交分享预览图（1200x630）
+    hero-app-preview-1158e04e.webp  # Hero 区域展示图（1200x1006）
+    feature-read-pdf-5578ead3.webp  # 功能1：阅读 PDF（1080x720）
+    feature-merge-pdf-019e91a8.webp   # 功能2：合并 PDF（1080x729）
+    feature-split-pdf-24a148d2.webp   # 功能3：拆分 PDF（1080x900）
+    feature-extract-pages-468a6676.webp # 功能4：提取页面（1080x777）
+    feature-export-pdf-15b1ca38.webp   # 功能5：从 PDF 导出（1080x720）
+    feature-convert-pdf-4f926b9c.webp   # 功能6：生成 PDF（1080x729）
   robots.txt
   sitemap.xml
   _headers                      # Cloudflare 缓存头
@@ -41,7 +41,7 @@ website/
 
 ## 产品截图
 
-首屏和功能图来自 PDFSee 的实际界面，使用专为网站生成的样本文档。社交分享图使用应用图标和阅读器截图。更新图片或样式时，请更换文件名中的内容哈希，并同步更新中英文首页的引用，避免 CDN 继续提供旧资源。
+首屏和功能图来自 PDFSee 的实际浅色界面，使用专为网站生成的样本文档。社交分享图使用应用图标和阅读器截图。更新图片或样式时，请更换文件名中的内容哈希，并同步更新中英文首页的引用，避免 CDN 继续提供旧资源。
 
 ## 本地预览
 

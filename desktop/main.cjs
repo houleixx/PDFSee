@@ -1,9 +1,10 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, net, protocol, screen, shell, utilityProcess } = require('electron');
 const { readFileSync, renameSync, writeFileSync } = require('node:fs');
-const { copyFile, mkdtemp, open, readFile, rename, rm, stat, writeFile } = require('node:fs/promises');
+const { access, chmod, copyFile, mkdtemp, open, readFile, realpath, rename, rm, stat, writeFile } = require('node:fs/promises');
 const { basename, dirname, extname, join, resolve, sep } = require('node:path');
 const { execFile } = require('node:child_process');
-const { randomUUID } = require('node:crypto');
+const { constants } = require('node:fs');
+const { createHash, randomUUID } = require('node:crypto');
 const { imagePages, createImageExport, createFormatExport } = require('./image-export.cjs');
 const { extensions: exportExtensions } = require('./pdf-formats.cjs');
 const { findOffice } = require('./office.cjs');
@@ -152,11 +153,13 @@ function kindOf(path) {
 async function register(path, owner) {
   const kind = kindOf(path);
   if (!kind) throw new Error('文件格式不受支持。');
+  path = await realpath(path);
   const info = await stat(path);
   if (!info.isFile() || !info.size) throw new Error('文件为空，或无法打开。');
   const id = randomUUID();
-  registered.set(id, { path, owner, kind, size: info.size });
-  return { id, kind, size: info.size, name: basename(path) };
+  registered.set(id, { path, owner, kind, size: info.size, info });
+  const key = createHash('sha256').update(process.platform === 'win32' ? path.toLowerCase() : path).digest('hex');
+  return { id, kind, size: info.size, name: basename(path), key };
 }
 
 async function releaseFile(owner, id) {
@@ -408,17 +411,69 @@ handle('edit-pages', async (owner, id, edit) => {
     throw error;
   }
 });
-handle('save-edited-pdf', async (owner, id) => {
+handle('stage-pdf', async (owner, id, bytes, edits) => {
   const file = getFile(id, owner, 'pdf');
-  if (!file.sources) throw new Error('没有页面改动可导出。');
-  const source = file.sources[0];
-  const path = await chooseOutput(join(dirname(source), `${basename(source, extname(source))}-整理.pdf`));
-  if (!path) return null;
-  await ensureDifferent(path, file.sources);
-  await saveAtomically(path, temporary => copyFile(file.path, temporary));
-  outputs.add(path);
-  return { name: basename(path), location: path };
+  if (!(bytes instanceof Uint8Array) || !bytes.length) throw new Error('无法保存 PDF 改动。');
+  const temporary = await mkdtemp(join(app.getPath('temp'), 'pdfsee-edits-'));
+  try {
+    const path = join(temporary, basename(file.path));
+    const data = await require('./pdf.cjs').editPdfNotes(bytes, edits);
+    await writeFile(path, data);
+    if (window?.webContents.id !== owner) throw new Error('文档窗口已关闭。');
+    const info = await register(path, owner);
+    Object.assign(getFile(info.id, owner, 'pdf'), { temporary, sources: file.sources ?? [file.path] });
+    return info;
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true });
+    throw error;
+  }
 });
+
+handle('save-reader-pdf', async (owner, baseId, currentId, bytes, asCopy, otherIds) => {
+  const base = getFile(baseId, owner, 'pdf');
+  const current = getFile(currentId, owner, 'pdf');
+  if (base.temporary || (bytes !== null && (!(bytes instanceof Uint8Array) || !bytes.length))) {
+    throw new Error('无法保存 PDF 改动。');
+  }
+  let path = base.path;
+  if (asCopy) {
+    path = await chooseOutput(join(dirname(base.path), `${basename(base.path, extname(base.path))}-副本.pdf`));
+    if (!path) return null;
+    const sources = [base.path, ...otherIds.map(id => getFile(id, owner, 'pdf').path), ...(current.sources ?? [])];
+    await ensureDifferent(path, [...new Set(sources)]);
+  } else {
+    await access(path, constants.W_OK);
+  }
+  await saveAtomically(path, async temporary => {
+    if (bytes) await writeFile(temporary, bytes);
+    else await copyFile(current.path, temporary);
+    if (!asCopy) {
+      await chmod(temporary, base.info.mode & 0o777);
+      const latest = await stat(path);
+      if (['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some(key => latest[key] !== base.info[key])) {
+        throw new Error(t('文件已在其他应用中修改，请另存为副本。'));
+      }
+    }
+  });
+  const file = await register(path, owner);
+  outputs.add(path);
+  return { file, output: { name: basename(path), location: path } };
+});
+
+handle('confirm-document-close', async (owner, name) => {
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'question', message: t('PDF 有未保存的改动'), detail: name,
+    buttons: [t('保存'), t('另存为…'), t('放弃改动'), t('取消')], defaultId: 0, cancelId: 3
+  });
+  return ['save', 'copy', 'discard', 'cancel'][response];
+});
+
+handle('finish-window-close', (_owner, approved) => {
+  if (approved) approvedWindowClose = true;
+  windowClosePending = false;
+  if (approved) setImmediate(() => window?.close());
+});
+
 handle('read', async (owner, id, start, end) => {
   const file = getFile(id, owner, 'pdf');
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 ||
@@ -562,7 +617,12 @@ function restoreWindowPosition(path, width, height) {
   }
 }
 
+let approvedWindowClose = false;
+let windowClosePending = false;
+
 function createWindow() {
+  approvedWindowClose = false;
+  windowClosePending = false;
   const width = 1100;
   const height = 820;
   const positionPath = join(app.getPath('userData'), 'window-position.json');
@@ -573,7 +633,15 @@ function createWindow() {
     webPreferences: { preload: join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false }
   });
   window = mainWindow;
-  mainWindow.on('close', () => {
+  mainWindow.on('close', event => {
+    if (!approvedWindowClose && ready.has(mainWindow.webContents.id)) {
+      event.preventDefault();
+      if (!windowClosePending) {
+        windowClosePending = true;
+        mainWindow.webContents.send('menu', 'close-window');
+      }
+      return;
+    }
     const { x, y } = mainWindow.getNormalBounds();
     try {
       const temporary = positionPath + '.tmp';
@@ -589,13 +657,6 @@ function createWindow() {
     ready.delete(owner);
     finishUpdatePrompt(owner);
     void cancelImages().catch(() => {});
-  });
-  window.webContents.on('will-prevent-unload', event => {
-    const choice = dialog.showMessageBoxSync(window, {
-      type: 'question', message: t('页面改动尚未另存。要放弃改动吗？'),
-      buttons: [t('继续编辑'), t('放弃改动')], defaultId: 0, cancelId: 0
-    });
-    if (choice === 1) event.preventDefault();
   });
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -633,6 +694,8 @@ function installMenu() {
     ] }] : []),
     { label: t('文件'), submenu: [
       { label: t('打开 PDF…'), accelerator: 'CmdOrCtrl+O', click: send('open') },
+      { label: t('保存'), accelerator: 'CmdOrCtrl+S', click: send('save') },
+      { label: t('另存为…'), accelerator: 'CmdOrCtrl+Shift+S', click: send('save-as') },
       { label: t('打印…'), accelerator: 'CmdOrCtrl+P', click: send('print') },
       { label: t('关闭文档'), accelerator: 'CmdOrCtrl+Shift+W', click: send('close') },
       { role: 'close', label: t('关闭窗口') },

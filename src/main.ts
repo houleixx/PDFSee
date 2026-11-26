@@ -1,6 +1,6 @@
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
-  AnnotationMode, getDocument, GlobalWorkerOptions, PasswordResponses, PDFDataRangeTransport
+  AnnotationEditorParamsType, AnnotationEditorType, AnnotationMode, getDocument, GlobalWorkerOptions, PasswordResponses, PDFDataRangeTransport
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/legacy/web/pdf_viewer.css';
@@ -10,11 +10,19 @@ import { applyLanguage, localizedAttribute, localizedText, registerStaticTransla
 import { createPageOcr, type RecognizedLine } from './page-ocr';
 
 type Kind = 'pdf' | 'image' | 'office';
-type FileInfo = { id: string; kind: Kind; name: string; size: number };
+type FileInfo = { id: string; kind: Kind; name: string; size: number; key: string };
 type Output = { name: string; location: string; count?: number; kind?: 'images' };
 type ToolResult = Output & { message?: string } | { message: string };
 type PdfFormat = 'pages' | 'long' | 'flat' | 'pptx' | 'docx';
 type ToolJob = { mode: string; ids: string[]; spec: string; groupSize: number; rotation: number; paper: string };
+type NoteAdd = { action: 'add'; page: number; x: number; y: number; text: string };
+type NoteChange =
+  | { action: 'remove'; page: number; id: string }
+  | { action: 'update'; page: number; id: string; text: string };
+type NoteMove = { action: 'move'; page: number; id: string; dx: number; dy: number };
+type PdfNoteEdit = NoteAdd | NoteChange | NoteMove;
+type NotePosition = { page: number; x: number; y: number };
+type NotePopover = NotePosition & { id?: string; text: string; editing: boolean };
 type PageEdit = { action: 'delete' | 'move' | 'insert'; page?: number; gap?: number };
 type UpdateProgress = { version: string; phase: 'download' | 'install'; percent: number | null };
 type UpdatePrompt = {
@@ -38,7 +46,10 @@ type Bridge = {
   release(id: string): Promise<void>;
   pageMenu(id: string, canDelete: boolean): Promise<'before' | 'after' | 'delete' | null>;
   editPages(id: string, edit: PageEdit & { ids: string[] }): Promise<FileInfo>;
-  saveEditedPdf(id: string): Promise<Output | null>;
+  stagePdf(id: string, bytes: Uint8Array, edits: PdfNoteEdit[]): Promise<FileInfo>;
+  saveReaderPdf(base: string, id: string, bytes: Uint8Array | null, asCopy: boolean, others: string[]): Promise<{ file: FileInfo; output: Output } | null>;
+  confirmDocumentClose(name: string): Promise<'save' | 'copy' | 'discard' | 'cancel'>;
+  finishWindowClose(approved: boolean): Promise<void>;
   execute(job: ToolJob): Promise<ToolResult | null>;
   saveImage(name: string, data: Uint8Array): Promise<Output | null>;
   beginImages(id: string, spec: string, count: number, format: PdfFormat): Promise<{ token: string; pages: number[] } | null>;
@@ -131,10 +142,30 @@ const thumbnailTasks = new Map<HTMLCanvasElement, { cancel: () => void }>();
 const drawnThumbnails = new WeakSet<HTMLCanvasElement>();
 let outlineLoaded = false;
 let thumbActive: HTMLElement | null = null;
-const pageHistory: { file: FileInfo; page: number }[] = [];
-let savedPageVersion: string | null = null;
+type PageHistory = { file: FileInfo; page: number; dirty: boolean; resultId: string }[];
+let pageHistory: PageHistory = [];
+type ReadingPosition = { page: number; scale: string; rotation: number; scrollLeft: number; offset: number; thumbnailScroll: number };
+type DocumentTab = {
+  base: FileInfo;
+  file: FileInfo;
+  history: PageHistory;
+  position: ReadingPosition | null;
+  dirty: boolean;
+  password?: string;
+};
+const tabs: DocumentTab[] = [];
+let activeTab: DocumentTab | null = null;
+let liveChanges = false;
+let noteMode = false;
+const noteMoves = new Map<string, NoteMove>();
+const noteChanges = new Map<string, NoteChange>();
+let notePopover: NotePopover | null = null;
+const newNotes = new Map<string, NoteAdd>();
+let nextNewNote = 0;
+let noteRequest = 0;
+let closingWindow = false;
 let initialPage = 1;
-let previewView: { page: number; scale: string; rotation: number; scrollLeft: number; offset: number; thumbnailScroll: number } | null = null;
+let previewView: ReadingPosition | null = null;
 let removePreviewSnapshot: (() => void) | null = null;
 let draggedPage: number | null = null;
 const thumbnails = byId('thumbnails');
@@ -149,14 +180,79 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 Object.assign(globalThis, { pdfjsLib: pdfjs });
 const { EventBus, PDFFindController, PDFLinkService, PDFViewer } = await import('pdfjs-dist/legacy/web/pdf_viewer.mjs');
 const asset = (directory: string) => new URL(`./pdfjs/${directory}/`, document.baseURI).href;
+const noteIconUrl = new URL('./images/pdfsee-note.png', document.baseURI).href;
 const bus = new EventBus();
 const links = new PDFLinkService({ eventBus: bus });
 links.externalLinkEnabled = false;
 const finder = new PDFFindController({ eventBus: bus, linkService: links });
-const viewer = new PDFViewer({
+const highlightColors = {
+  yellow: '#FFFF98', green: '#91FFA0', blue: '#9DD7FF', pink: '#FFB7D5', purple: '#D5B8FF'
+};
+const highlightColorPreference = 'pdfsee.highlightColor';
+const supportedHighlightColor = (color: unknown): color is string =>
+  typeof color === 'string' && Object.values(highlightColors).includes(color);
+let preferredHighlightColor = highlightColors.yellow;
+try {
+  const stored = localStorage.getItem(highlightColorPreference);
+  if (supportedHighlightColor(stored)) preferredHighlightColor = stored;
+} catch {
+  // The preference can still be used for this session if browser storage is unavailable.
+}
+const viewerOptions = {
   container: byId<HTMLDivElement>('viewer-container'), viewer: byId<HTMLDivElement>('viewer'), eventBus: bus,
   linkService: links, findController: finder, annotationMode: AnnotationMode.ENABLE,
-  annotationEditorMode: -1, imageResourcesPath: asset('web/images'), enableAutoLinking: false
+  annotationEditorMode: AnnotationEditorType.NONE,
+  annotationEditorHighlightColors: Object.entries(highlightColors).map(([name, color]) => `${name}=${color}`).join(','),
+  imageResourcesPath: asset('web/images'), enableAutoLinking: false
+};
+const viewer = new PDFViewer(viewerOptions);
+let annotationEditor: {
+  commitOrRemove(): void;
+  undo(): void;
+  addCommands(options: { cmd: () => void; undo: () => void; mustExec: boolean }): void;
+  readonly hasSelection: boolean;
+  updateParams(type: number, value: string): void;
+} | null = null;
+let annotationCanUndo = false;
+let highlightDefaultPending = true;
+let highlightColorReady = false;
+let editorMode = AnnotationEditorType.DISABLE;
+bus.on('annotationeditoruimanager', ({ uiManager }) => {
+  annotationEditor = uiManager;
+  highlightDefaultPending = true;
+  highlightColorReady = false;
+  editorMode = AnnotationEditorType.NONE;
+});
+function applyPreferredHighlightColor() {
+  if (!highlightColorReady || !highlightDefaultPending || !annotationEditor || annotationEditor.hasSelection) return;
+  annotationEditor.updateParams(AnnotationEditorParamsType.HIGHLIGHT_COLOR, preferredHighlightColor);
+  highlightDefaultPending = false;
+}
+bus.on('switchannotationeditorparams', ({ type, value }) => {
+  if (type !== AnnotationEditorParamsType.HIGHLIGHT_COLOR || !supportedHighlightColor(value)) return;
+  preferredHighlightColor = value;
+  highlightDefaultPending = true;
+  try {
+    localStorage.setItem(highlightColorPreference, value);
+  } catch {
+    // Keep the chosen color in memory for the active session.
+  }
+  applyPreferredHighlightColor();
+});
+bus.on('annotationeditorlayerrendered', ({ error }) => {
+  if (error) return;
+  highlightColorReady = true;
+  applyPreferredHighlightColor();
+});
+bus.on('editingstateschanged', ({ source, details }) => {
+  if (source !== annotationEditor) return;
+  applyPreferredHighlightColor();
+  annotationCanUndo = !!details.hasSomethingToUndo;
+  if (!doc?.annotationStorage.size) liveChanges = false;
+  refreshPageEditing();
+});
+bus.on('switchannotationeditormode', ({ mode, editId, isFromKeyboard, mustEnterInEditMode }) => {
+  if (annotationEditor && !tabBusy()) viewer.annotationEditorMode = { mode, editId, isFromKeyboard, mustEnterInEditMode };
 });
 links.setViewer(viewer);
 const pageOcr = desktop.canRecognizePages
@@ -208,9 +304,11 @@ function success(result: ToolResult | null, label: string) {
 }
 
 function refreshSection() {
-  byId('home').hidden = mode !== 'read' || !!doc;
-  byId('reader').hidden = mode !== 'read' || !doc;
+  const showingDocument = !!doc || !!removePreviewSnapshot;
+  byId('home').hidden = mode !== 'read' || showingDocument;
+  byId('reader').hidden = mode !== 'read' || !showingDocument;
   byId('tools').hidden = mode === 'read';
+  byId('document-tabs').hidden = mode !== 'read' || !tabs.length;
   const title = byId('section-title');
   if (mode === 'read' && current) title.textContent = current.name;
   else localizedText(title, mode === 'read' ? '阅读 PDF' : mode === 'raster' ? pdfFormats[pdfFormat].title : tools[mode].title);
@@ -224,34 +322,281 @@ function refreshSection() {
 }
 
 function refreshPageEditing() {
-  button('undo-page-edit').hidden = !pageHistory.length;
-  button('save-page-edit').hidden = !pageHistory.length;
+  button('undo-edit').disabled = !annotationCanUndo && !pageHistory.length;
+  button('save-document').disabled = !activeTab?.dirty && !hasLiveChanges() && !noteDraftChanged();
+  Array.from(byId('document-tabs').children).forEach((item, index) => {
+    const tab = tabs[index];
+    const dirty = !!tab && (tab.dirty || (tab === activeTab && hasLiveChanges()));
+    item.querySelector('[data-dirty]')!.toggleAttribute('hidden', !dirty);
+  });
 }
-
-function resetPageEditing() {
-  for (const entry of pageHistory.splice(0)) releaseUnused(entry.file);
-  savedPageVersion = null;
-  refreshPageEditing();
-}
-
-function hasUnsavedPageEdits() {
-  return pageHistory.length > 0 && current?.id !== savedPageVersion;
-}
-
-function confirmDiscardEdits() {
-  return !hasUnsavedPageEdits() || window.confirm(translate('页面改动尚未另存。要放弃改动吗？'));
-}
-
-window.addEventListener('beforeunload', event => {
-  if (!hasUnsavedPageEdits()) return;
-  event.preventDefault();
-  event.returnValue = '';
-});
 
 function releaseUnused(file: FileInfo) {
   if (file.id !== current?.id && !selections.some(item => item.id === file.id) &&
+      !tabs.some(tab => tab.base.id === file.id || tab.file.id === file.id ||
+        tab.history.some(entry => entry.file.id === file.id)) &&
       !pageHistory.some(entry => entry.file.id === file.id)) {
     void desktop.release(file.id).catch(() => {});
+  }
+}
+
+function renderTabs() {
+  const bar = byId('document-tabs');
+  const focus = bar.contains(document.activeElement);
+  bar.replaceChildren(...tabs.map(tab => {
+    const item = document.createElement('div');
+    item.className = 'document-tab';
+    const label = document.createElement('button');
+    label.type = 'button';
+    label.className = 'document-tab-label';
+    label.title = tab.base.name;
+    label.setAttribute('aria-label', tab.base.name);
+    const extension = /\.pdf$/i.exec(tab.base.name)?.[0] ?? '';
+    const name = document.createElement('span');
+    name.className = 'document-tab-name';
+    name.textContent = tab.base.name.slice(0, tab.base.name.length - extension.length);
+    label.append(name);
+    if (extension) {
+      const suffix = document.createElement('span');
+      suffix.className = 'document-tab-extension';
+      suffix.textContent = extension;
+      label.append(suffix);
+    }
+    if (tab === activeTab) label.setAttribute('aria-current', 'page');
+    label.onclick = () => void activateTab(tab).catch(errorStatus);
+    const dirty = document.createElement('span');
+    dirty.dataset.dirty = '';
+    localizedAttribute(dirty, 'aria-label', '未保存的改动');
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'square document-tab-close';
+    localizedAttribute(close, 'aria-label', '关闭标签页');
+    localizedAttribute(close, 'title', '关闭标签页');
+    close.append(icon('x'));
+    close.onclick = () => void closeTab(tab).catch(errorStatus);
+    item.append(label, dirty, close);
+    return item;
+  }));
+  const selected = bar.querySelector<HTMLButtonElement>('[aria-current]');
+  selected?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (focus) (selected ?? button('open-file')).focus();
+  refreshPageEditing();
+  refreshSection();
+}
+
+function readPosition(): ReadingPosition | null {
+  if (!doc || !viewer.currentScaleValue) return null;
+  const page = viewer.currentPageNumber;
+  return {
+    page, scale: viewer.currentScaleValue, rotation: viewer.pagesRotation, scrollLeft: viewer.container.scrollLeft,
+    offset: viewer.container.scrollTop - (viewer.getPageView(page - 1)?.div.offsetTop ?? 0),
+    thumbnailScroll: thumbnails.scrollTop
+  };
+}
+
+function setNoteMode(enabled: boolean) {
+  noteMode = enabled;
+  button('annotation-note').setAttribute('aria-pressed', String(enabled));
+  viewer.container.classList.toggle('placing-note', enabled);
+}
+
+function annotationBytes() {
+  annotationEditor?.commitOrRemove();
+  return doc!.annotationStorage.size ? doc!.saveDocument() : doc!.getData();
+}
+
+function hasLiveChanges() {
+  return liveChanges || noteMoves.size > 0 || noteChanges.size > 0 || newNotes.size > 0;
+}
+
+function hasPendingNoteEdits() {
+  return noteMoves.size > 0 || noteChanges.size > 0 || newNotes.size > 0;
+}
+
+function pendingNoteEdits(): PdfNoteEdit[] {
+  const edits: PdfNoteEdit[] = [];
+  for (const move of noteMoves.values()) if (!newNotes.has(move.id)) edits.push(move);
+  for (const change of noteChanges.values()) if (!newNotes.has(change.id)) edits.push(change);
+  for (const [id, note] of newNotes) {
+    const change = noteChanges.get(id);
+    if (change?.action === 'remove') continue;
+    const move = noteMoves.get(id);
+    edits.push({ ...note, x: note.x + (move?.dx ?? 0), y: note.y + (move?.dy ?? 0), text: change?.text ?? note.text });
+  }
+  return edits;
+}
+
+function clearNoteEdits() {
+  noteMoves.clear();
+  noteChanges.clear();
+  newNotes.clear();
+}
+
+async function stageActiveChanges() {
+  if (!activeTab || !current || !doc || !hasLiveChanges()) return current;
+  const file = await desktop.stagePdf(current.id, await annotationBytes(), pendingNoteEdits());
+  activeTab.file = file;
+  activeTab.dirty = true;
+  liveChanges = false;
+  clearNoteEdits();
+  refreshPageEditing();
+  return file;
+}
+
+function tabBusy() {
+  return running || exporting || printing || closingWindow;
+}
+
+async function activateTab(tab: DocumentTab) {
+  finishNote();
+  if (tabBusy() || !tabs.includes(tab)) return;
+  if (tab === activeTab && (doc || task)) {
+    setMode('read');
+    return;
+  }
+  if (activeTab) {
+    const previous = activeTab;
+    running = true;
+    viewer.container.inert = true;
+    try {
+      previous.position = readPosition() ?? previous.position;
+      if (current) {
+        const file = await stageActiveChanges();
+        if (file) previous.file = file;
+      }
+    } finally {
+      viewer.container.inert = false;
+      running = false;
+    }
+  }
+  activeTab = tab;
+  pageHistory = tab.history;
+  renderTabs();
+  await loadDocument(tab.file, tab.position?.page ?? 1, tab.position, { keepPreview: true, keepSearch: false });
+}
+
+async function openDocument(file: FileInfo) {
+  finishNote();
+  if (tabBusy()) {
+    releaseUnused(file);
+    return status('正在处理文件，请稍候。');
+  }
+  const existing = tabs.find(tab => tab.base.key === file.key);
+  if (existing) {
+    releaseUnused(file);
+    return activateTab(existing);
+  }
+  const tab: DocumentTab = { base: file, file, history: [], position: null, dirty: false };
+  tabs.push(tab);
+  try {
+    await activateTab(tab);
+  } catch (error) {
+    if (activeTab !== tab) removeTab(tab);
+    throw error;
+  }
+}
+
+function removeTab(tab: DocumentTab) {
+  tabs.splice(tabs.indexOf(tab), 1);
+  [tab.base, tab.file, ...tab.history.map(entry => entry.file)].forEach(releaseUnused);
+  renderTabs();
+}
+
+async function saveTab(tab: DocumentTab, asCopy: boolean) {
+  const active = tab === activeTab;
+  const file = active ? current : tab.file;
+  if (!file || (active && !doc) || (!asCopy && !tab.dirty && !(active && hasLiveChanges()))) return false;
+  running = true;
+  viewer.container.inert = true;
+  let staged: FileInfo | undefined;
+  try {
+    const position = active ? readPosition() : tab.position;
+    if (active && hasPendingNoteEdits()) {
+      staged = await desktop.stagePdf(file.id, await annotationBytes(), pendingNoteEdits());
+    }
+    const bytes = active && liveChanges && !staged ? await annotationBytes() : null;
+    const result = await desktop.saveReaderPdf(tab.base.id, (staged ?? file).id, bytes, asCopy,
+      tabs.filter(other => other !== tab).map(other => other.base.id));
+    if (!result) return false;
+    const old = [tab.base, tab.file];
+    const latestEdit = tab.history.at(-1);
+    if (asCopy) {
+      for (const entry of tab.history) entry.dirty = true;
+      if (latestEdit?.resultId === file.id && !(active && hasLiveChanges())) latestEdit.resultId = result.file.id;
+    } else {
+      old.push(...tab.history.map(entry => entry.file));
+      tab.history.length = 0;
+    }
+    tab.base = tab.file = result.file;
+    tab.position = position;
+    tab.dirty = false;
+    if (active) {
+      liveChanges = false;
+      clearNoteEdits();
+    }
+    old.forEach(releaseUnused);
+    renderTabs();
+    if (active) await loadDocument(tab.file, position?.page ?? 1, position, { keepPreview: true });
+    success(result.output, asCopy ? '已另存 PDF' : '已保存 PDF');
+    return true;
+  } finally {
+    if (staged) releaseUnused(staged);
+    viewer.container.inert = false;
+    running = false;
+  }
+}
+
+async function confirmClose(tab: DocumentTab) {
+  if (!tab.dirty && !(tab === activeTab && hasLiveChanges())) return true;
+  const choice = await desktop.confirmDocumentClose(tab.base.name);
+  if (choice === 'cancel') return false;
+  if (choice === 'discard') return true;
+  return saveTab(tab, choice === 'copy');
+}
+
+async function closeTab(tab: DocumentTab) {
+  finishNote();
+  if (tabBusy() || !tabs.includes(tab)) return;
+  closingWindow = true;
+  try {
+    if (!await confirmClose(tab)) return;
+  } finally { closingWindow = false; }
+  const index = tabs.indexOf(tab);
+  if (activeTab !== tab) {
+    removeTab(tab);
+    return;
+  }
+  activeTab = null;
+  pageHistory = [];
+  ++loadVersion;
+  removePreviewSnapshot?.();
+  clearReader();
+  removeTab(tab);
+  const next = tabs[index] ?? tabs[index - 1];
+  if (next) await activateTab(next);
+  else status('已关闭文档。');
+}
+
+function closeDocument() {
+  if (activeTab) void closeTab(activeTab).catch(errorStatus);
+}
+
+async function closeWindow() {
+  finishNote();
+  if (tabBusy()) {
+    await desktop.finishWindowClose(false);
+    return;
+  }
+  closingWindow = true;
+  let approved = false;
+  try {
+    for (const tab of tabs) {
+      if (!await confirmClose(tab)) return;
+    }
+    approved = true;
+  } finally {
+    closingWindow = false;
+    await desktop.finishWindowClose(approved);
   }
 }
 
@@ -298,6 +643,8 @@ function setMode(next: Mode, format = pdfFormat) {
 }
 
 function clearReader(preserveSearch = false) {
+  dismissNote();
+  clearNoteEdits();
   thumbnailObserver?.disconnect();
   thumbnailObserver = null;
   for (const render of thumbnailTasks.values()) render.cancel();
@@ -318,6 +665,13 @@ function clearReader(preserveSearch = false) {
   const dialog = byId<HTMLDialogElement>('password-dialog');
   if (dialog.open) dialog.close('cancel');
   pageOcr?.reset();
+  setNoteMode(false);
+  button('annotation-highlight').setAttribute('aria-pressed', 'false');
+  liveChanges = false;
+  annotationEditor = null;
+  annotationCanUndo = false;
+  editorMode = AnnotationEditorType.DISABLE;
+  if (doc) doc.annotationStorage.onSetModified = null;
   viewer.setDocument(null);
   links.setDocument(null);
   doc = null;
@@ -351,15 +705,21 @@ function holdPreviewUntilRendered() {
   let timeout = 0;
   const remove = () => {
     window.clearTimeout(timeout);
-    bus.off('pagerendered', finish);
+    bus.off('annotationlayerrendered', finish);
+    bus.off('pagerendered', finishOnError);
     snapshot.remove();
     removePreviewSnapshot = null;
+    if (!doc) refreshSection();
   };
-  const finish = ({ pageNumber, cssTransform }: { pageNumber: number; cssTransform: boolean }) => {
-    if (pageNumber === viewer.currentPageNumber && !cssTransform) remove();
+  const finish = ({ pageNumber, source }: { pageNumber: number; source: unknown }) => {
+    if (pageNumber === viewer.currentPageNumber && source === viewer.getPageView(pageNumber - 1)) remove();
+  };
+  const finishOnError = (event: { pageNumber: number; source: unknown; error?: unknown }) => {
+    if (event.error) finish(event);
   };
   removePreviewSnapshot = remove;
-  bus.on('pagerendered', finish);
+  bus.on('annotationlayerrendered', finish);
+  bus.on('pagerendered', finishOnError);
   timeout = window.setTimeout(remove, 4000);
 }
 
@@ -367,35 +727,22 @@ function showDocumentStatus(file: FileInfo, pageCount: number) {
   status(`${file.name} · ${pageCount} 页 · ${sizeText(file.size)}`);
 }
 
-async function openDocument(file: FileInfo, page?: number) {
-  if (running) {
-    releaseUnused(file);
-    return status('正在处理文件，请稍候。');
-  }
-  if (page === undefined) {
-    if (!confirmDiscardEdits()) { releaseUnused(file); return; }
-    resetPageEditing();
-  }
-  removePreviewSnapshot?.();
-  const preserveView = page !== undefined && doc && mode === 'read';
-  previewView = preserveView ? {
-    page: viewer.currentPageNumber,
-    scale: viewer.currentScaleValue,
-    rotation: viewer.pagesRotation,
-    scrollLeft: viewer.container.scrollLeft,
-    offset: viewer.container.scrollTop - (viewer.getPageView(viewer.currentPageNumber - 1)?.div.offsetTop ?? 0),
-    thumbnailScroll: thumbnails.scrollTop
-  } : null;
-  if (preserveView) holdPreviewUntilRendered();
+async function loadDocument(file: FileInfo, page: number, position: ReadingPosition | null,
+  { keepPreview = false, keepSearch = keepPreview }: { keepPreview?: boolean; keepSearch?: boolean } = {}) {
+  const preserveView = keepPreview && mode === 'read' && (!!doc || !!removePreviewSnapshot);
+  if (!preserveView) removePreviewSnapshot?.();
+  else if (!removePreviewSnapshot) holdPreviewUntilRendered();
+  previewView = position;
+  const tab = activeTab;
+  let password = tab?.password;
   const version = ++loadVersion;
-  clearReader(!!preserveView);
-  initialPage = page ?? 1;
+  clearReader(preserveView && keepSearch);
+  initialPage = page;
   current = file;
+  refreshPageEditing();
   setMode('read');
-  if (!preserveView) {
-    refreshSection();
-    status(`正在打开 ${file.name}…`);
-  }
+  refreshSection();
+  if (!preserveView) status(`正在打开 ${file.name}…`);
   try {
     const transport = new class extends PDFDataRangeTransport {
       requestDataRange(start: number, end: number) {
@@ -412,7 +759,7 @@ async function openDocument(file: FileInfo, page?: number) {
       }
     }(file.size, null, true);
     const loading = getDocument({
-      range: transport, rangeChunkSize: 256 * 1024, disableStream: true, disableAutoFetch: true,
+      password, range: transport, rangeChunkSize: 256 * 1024, disableStream: true, disableAutoFetch: true,
       cMapUrl: asset('cmaps'), cMapPacked: true, standardFontDataUrl: asset('standard_fonts'),
       wasmUrl: asset('wasm'), iccUrl: asset('iccs'), isEvalSupported: false,
       enableXfa: false, useSystemFonts: true, docBaseUrl: document.baseURI
@@ -425,10 +772,13 @@ async function openDocument(file: FileInfo, page?: number) {
       input('password').value = '';
       dialog.returnValue = 'cancel';
       dialog.onclose = () => {
-        const password = input('password').value;
+        const entered = input('password').value;
         input('password').value = '';
         if (version !== loadVersion) return;
-        if (dialog.returnValue === 'unlock') submit(password);
+        if (dialog.returnValue === 'unlock') {
+          password = entered;
+          submit(entered);
+        }
         else closeDocument();
       };
       dialog.showModal();
@@ -437,6 +787,14 @@ async function openDocument(file: FileInfo, page?: number) {
     const loaded = await loading.promise;
     if (version !== loadVersion) return;
     doc = loaded;
+    if (tab) tab.password = password;
+    // PDF.js exposes this callback at runtime, but its declaration only lists null.
+    const storage = loaded.annotationStorage as { onSetModified: (() => void) | null };
+    storage.onSetModified = () => {
+      if (doc !== loaded) return;
+      liveChanges = true;
+      refreshPageEditing();
+    };
     refreshSection();
     links.setDocument(loaded);
     viewer.setDocument(loaded);
@@ -453,16 +811,6 @@ async function openDocument(file: FileInfo, page?: number) {
     status(error instanceof Error && error.name === 'InvalidPDFException'
       ? '无法打开这个 PDF。请确认文件完整。' : `打开失败：${error instanceof Error ? error.message : String(error)}`, true);
   }
-}
-
-function closeDocument() {
-  if (running || !current || !confirmDiscardEdits()) return;
-  resetPageEditing();
-  ++loadVersion;
-  removePreviewSnapshot?.();
-  clearReader();
-  refreshSection();
-  status('已关闭文档。');
 }
 
 function icon(name: string) {
@@ -1008,10 +1356,11 @@ function addFiles(files: FileInfo[], kind: Kind, multi: boolean) {
 }
 
 async function pickPdf() {
-  if (running) return;
   try {
-    const [file] = await desktop.pick('pdf', false);
-    if (file) await openDocument(file);
+    finishNote();
+    if (tabBusy()) return;
+    const files = await desktop.pick('pdf', true);
+    for (const file of files) await openDocument(file).catch(errorStatus);
   } catch (error) { errorStatus(error); }
 }
 
@@ -1068,7 +1417,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-panel]').forEach(element => 
 click('open-feedback', () => { void desktop.openFeedback().catch(errorStatus); });
 click('open-file', () => void pickPdf());
 click('home-open', () => void pickPdf());
-click('close-file', closeDocument);
 click('tool-picker', () => void pickToolFiles());
 click('use-current', () => {
   if (current && mode !== 'read' && !running && !selections.some(file => file.id === current?.id)) {
@@ -1125,11 +1473,14 @@ select('zoom').onchange = () => { viewer.currentScaleValue = select('zoom').valu
 byId('open-key').textContent = navigator.platform.startsWith('Mac') ? '⌘ O' : 'Ctrl+O';
 
 async function editReaderPages(edit: PageEdit, targetPage: number, getFiles?: () => Promise<FileInfo[]>) {
-  if (running || exporting || printing || !current || !doc || removePreviewSnapshot) return;
-  const previous = { file: current, page: viewer.currentPageNumber };
+  if (tabBusy() || !activeTab || !current || !doc || removePreviewSnapshot) return;
+  const tab = activeTab;
+  const position = readPosition();
+  let previous: PageHistory[number] | undefined;
   let files: FileInfo[] = [];
   let preview: FileInfo | undefined;
   running = true;
+  viewer.container.inert = true;
   try {
     if (getFiles) {
       files = await getFiles();
@@ -1139,21 +1490,36 @@ async function editReaderPages(edit: PageEdit, targetPage: number, getFiles?: ()
       }
     }
     status('正在更新页面…');
-    preview = await desktop.editPages(previous.file.id, { ...edit, ids: files.map(file => file.id) });
+    const file = await stageActiveChanges();
+    if (!file) return;
+    const previousPage = viewer.currentPageNumber;
+    try {
+      preview = await desktop.editPages(file.id, { ...edit, ids: files.map(file => file.id) });
+    } catch (error) {
+      if (file !== current) await loadDocument(file, previousPage, position, { keepPreview: true });
+      throw error;
+    }
+    previous = { file, page: previousPage, dirty: tab.dirty, resultId: preview.id };
+    tab.file = preview;
+    tab.dirty = true;
     pageHistory.push(previous);
   } catch (error) {
     errorStatus(error);
   } finally {
     files.forEach(releaseUnused);
+    viewer.container.inert = false;
     running = false;
   }
-  if (!preview) return;
+  if (!preview || !previous) return;
   const previewVersion = loadVersion + 1;
-  await openDocument(preview, targetPage);
+  await loadDocument(preview, targetPage, position, { keepPreview: true });
   if (loadVersion !== previewVersion) return;
   if (!doc) {
     pageHistory.pop();
-    await openDocument(previous.file, previous.page);
+    tab.file = previous.file;
+    tab.dirty = previous.dirty;
+    releaseUnused(preview);
+    await loadDocument(previous.file, previous.page, position);
   }
   refreshPageEditing();
 }
@@ -1171,19 +1537,422 @@ async function showPageMenu(page: number) {
   await editReaderPages({ action: 'insert', gap }, gap + 1, () => desktop.pick('pdf', true));
 }
 
-click('undo-page-edit', () => {
-  if (running || exporting || printing || !doc || removePreviewSnapshot) return;
-  const previous = pageHistory.pop();
-  if (previous) void openDocument(previous.file, previous.page).then(refreshPageEditing);
+function undoEdit() {
+  if (tabBusy() || mode !== 'read' || !activeTab || !doc || removePreviewSnapshot) return;
+  finishNote();
+  if (annotationCanUndo && annotationEditor) {
+    annotationEditor.undo();
+    refreshPageEditing();
+    return;
+  }
+  const previous = pageHistory.at(-1);
+  if (!previous) return;
+  // The earlier PDF may contain a different set of pages and annotations.
+  if ((hasLiveChanges() || activeTab.file.id !== previous.resultId) &&
+      !window.confirm(translate('撤销页面编辑会恢复到上一个文档版本。继续吗？'))) return;
+  pageHistory.pop();
+  activeTab.file = previous.file;
+  activeTab.dirty = previous.dirty;
+  void loadDocument(previous.file, previous.page, readPosition(), { keepPreview: true });
+}
+
+click('undo-edit', undoEdit);
+document.addEventListener('keydown', event => {
+  if (event.isComposing || event.shiftKey || event.altKey || !(event.metaKey || event.ctrlKey) ||
+      event.key.toLowerCase() !== 'z' || mode !== 'read' ||
+      (event.target instanceof HTMLElement && (event.target.closest('input, textarea, select') || event.target.isContentEditable))) return;
+  if (button('undo-edit').disabled) return;
+  event.preventDefault();
+  event.stopPropagation();
+  undoEdit();
+}, true);
+
+function saveCurrent(asCopy: boolean) {
+  finishNote();
+  if (!tabBusy() && activeTab) void saveTab(activeTab, asCopy).catch(errorStatus);
+}
+click('save-document', () => saveCurrent(false));
+click('save-page-edit', () => saveCurrent(true));
+click('annotation-highlight', () => {
+  if (tabBusy() || !annotationEditor) return;
+  setNoteMode(false);
+  viewer.annotationEditorMode = {
+    mode: editorMode === AnnotationEditorType.HIGHLIGHT ? AnnotationEditorType.NONE : AnnotationEditorType.HIGHLIGHT
+  };
 });
-click('save-page-edit', () => {
-  if (running || exporting || printing || !current || !doc || removePreviewSnapshot || !pageHistory.length) return;
-  const id = current.id;
-  running = true;
-  void desktop.saveEditedPdf(id).then(result => {
-    if (result) savedPageVersion = id;
-    success(result, '已另存 PDF');
-  }).catch(errorStatus).finally(() => { running = false; });
+bus.on('annotationeditormodechanged', ({ mode }) => {
+  editorMode = mode;
+  button('annotation-highlight').setAttribute('aria-pressed', String(mode === AnnotationEditorType.HIGHLIGHT));
+});
+click('annotation-note', () => {
+  if (tabBusy() || !doc) return;
+  if (annotationEditor) viewer.annotationEditorMode = { mode: AnnotationEditorType.NONE };
+  setNoteMode(!noteMode);
+  if (noteMode) status('在页面上点击要添加便签的位置。');
+});
+function noteDraftChanged() {
+  const text = byId<HTMLTextAreaElement>('annotation-text').value.trim();
+  return !!notePopover?.editing && !!text && text !== notePopover.text;
+}
+
+function dismissNote() {
+  ++noteRequest;
+  notePopover = null;
+  byId('note-popover').hidden = true;
+}
+
+function pagePoint(element: Element, clientX: number, clientY: number) {
+  const page = Number(element.closest<HTMLElement>('.page')?.dataset.pageNumber);
+  const view = viewer.getPageView(page - 1);
+  if (!view) return null;
+  const rect = view.div.getBoundingClientRect();
+  const [x, y] = view.viewport.convertToPdfPoint(clientX - rect.left - view.div.clientLeft, clientY - rect.top - view.div.clientTop);
+  return { page, x, y };
+}
+
+function noteElement(page: number, id: string): HTMLElement | null {
+  const view = viewer.getPageView(page - 1);
+  return view?.div.querySelector(`.textAnnotation[data-annotation-id="${CSS.escape(id)}"]`) ?? null;
+}
+
+function positionNote() {
+  if (!notePopover) return;
+  const view = viewer.getPageView(notePopover.page - 1);
+  if (!view) return;
+  const popover = byId('note-popover');
+  const page = view.div.getBoundingClientRect();
+  const viewport = popover.parentElement!.getBoundingClientRect();
+  const [x, y] = view.viewport.convertToViewportPoint(notePopover.x, notePopover.y);
+  const anchor = notePopover.id && noteElement(notePopover.page, notePopover.id)?.getBoundingClientRect();
+  const left = (anchor?.left ?? page.left + view.div.clientLeft + x) - viewport.left;
+  const right = anchor ? anchor.right - viewport.left : left;
+  const top = (anchor?.top ?? page.top + view.div.clientTop + y) - viewport.top;
+  const bottom = anchor ? anchor.bottom - viewport.top : top;
+  const width = popover.offsetWidth;
+  const height = popover.offsetHeight;
+  const gap = 10;
+  const clamp = (value: number, maximum: number) => Math.max(8, Math.min(value, maximum - 8));
+  let popupX = right + gap;
+  let popupY = top - 8;
+  if (popupX + width > viewport.width - 8) {
+    popupX = left - width - gap;
+    if (popupX < 8) {
+      popupX = left;
+      popupY = bottom + gap <= viewport.height - height - 8 ? bottom + gap : top - height - gap;
+    }
+  }
+  popover.style.left = `${clamp(popupX, viewport.width - width)}px`;
+  popover.style.top = `${clamp(popupY, viewport.height - height)}px`;
+}
+
+function showNote(note: NotePopover, text = note.text) {
+  notePopover = note;
+  const field = byId<HTMLTextAreaElement>('annotation-text');
+  field.value = text;
+  field.hidden = !note.editing;
+  byId('note-body').textContent = note.text;
+  byId('note-body').hidden = note.editing;
+  const canChange = !!note.id && (newNotes.has(note.id) || /^\d+R\d*$/.test(note.id));
+  byId('note-actions').hidden = note.editing || !canChange;
+  byId('note-popover').hidden = false;
+  positionNote();
+  if (note.editing) field.focus({ preventScroll: true });
+  refreshPageEditing();
+}
+
+type NoteState = { draft?: NoteAdd; change?: NoteChange; move?: NoteMove };
+
+function noteState(id: string): NoteState {
+  return { draft: newNotes.get(id), change: noteChanges.get(id), move: noteMoves.get(id) };
+}
+
+function renderNoteState(page: number, id: string) {
+  const draft = newNotes.get(id);
+  const view = viewer.getPageView(page - 1);
+  if (!view) return;
+  let element = noteElement(page, id);
+  if (draft) {
+    if (!element) {
+      const local = document.createElement('button');
+      local.type = 'button';
+      local.className = 'textAnnotation pdfsee-draft-note';
+      local.dataset.annotationId = id;
+      local.dataset.movable = '';
+      localizedAttribute(local, 'aria-label', '查看便签');
+      const image = document.createElement('img');
+      image.src = noteIconUrl;
+      image.alt = '';
+      image.draggable = false;
+      local.append(image);
+      view.div.append(local);
+      element = local;
+    }
+    const [x1, y1, x2, y2] = view.viewport.convertToViewportRectangle([draft.x, draft.y - 20, draft.x + 20, draft.y]);
+    element.style.left = `${Math.min(x1, x2)}px`;
+    element.style.top = `${Math.min(y1, y2)}px`;
+    element.style.width = `${Math.abs(x2 - x1)}px`;
+    element.style.height = `${Math.abs(y2 - y1)}px`;
+  } else if (element?.classList.contains('pdfsee-draft-note')) {
+    element.remove();
+    return;
+  }
+  if (element) {
+    element.hidden = noteChanges.get(id)?.action === 'remove';
+    positionMovedNote(element);
+  }
+}
+
+function recordNoteEdit(page: number, id: string, next: NoteState) {
+  const previous = noteState(id);
+  const apply = ({ draft, change, move }: NoteState) => {
+    if (draft) newNotes.set(id, draft);
+    else newNotes.delete(id);
+    if (change) noteChanges.set(id, change);
+    else noteChanges.delete(id);
+    if (move) noteMoves.set(id, move);
+    else noteMoves.delete(id);
+    if (notePopover?.id === id && (!move || change?.action === 'remove')) dismissNote();
+    renderNoteState(page, id);
+    positionNote();
+    refreshPageEditing();
+  };
+  annotationEditor?.addCommands({ cmd: () => apply(next), undo: () => apply(previous), mustExec: true });
+}
+
+function finishNote() {
+  const note = notePopover;
+  if (!note) return;
+  const text = byId<HTMLTextAreaElement>('annotation-text').value.trim();
+  const changed = noteDraftChanged();
+  dismissNote();
+  if (!changed) {
+    refreshPageEditing();
+    return;
+  }
+  const { page, id, x, y } = note;
+  if (id) {
+    recordNoteEdit(page, id, { ...noteState(id), change: { action: 'update', page, id, text } });
+  } else {
+    recordNoteEdit(page, `new-note-${++nextNewNote}`, { draft: { action: 'add', page, x, y, text } });
+  }
+}
+
+async function viewNote(element: HTMLElement) {
+  const id = element.dataset.annotationId;
+  const bounds = element.getBoundingClientRect();
+  const position = pagePoint(element, bounds.right, bounds.top);
+  const tab = activeTab;
+  if (!position || !id || (notePopover?.id === id && notePopover.page === position.page)) return;
+  const source = doc;
+  const request = ++noteRequest;
+  if (!source || tab !== activeTab || tabBusy()) return;
+  const draft = newNotes.get(id);
+  const annotations = draft ? [] : await (await source.getPage(position.page)).getAnnotations();
+  const note = annotations.find(annotation => annotation.id === id && annotation.subtype === 'Text');
+  if ((!draft && !note) || source !== doc || tabBusy() || request !== noteRequest) return;
+  const change = noteChanges.get(id);
+  if (change?.action === 'remove') return;
+  showNote({ ...position, id, text: change?.text ?? draft?.text ?? note?.contentsObj?.str ?? '', editing: false });
+}
+
+button('edit-note').onclick = () => {
+  if (notePopover) showNote({ ...notePopover, editing: true });
+};
+button('remove-note').onclick = () => {
+  const note = notePopover;
+  if (!note?.id || tabBusy()) return;
+  dismissNote();
+  const { page, id } = note;
+  recordNoteEdit(page, id, { draft: newNotes.get(id), change: { action: 'remove', page, id } });
+};
+byId('annotation-text').addEventListener('input', refreshPageEditing);
+viewer.container.addEventListener('scroll', positionNote, { passive: true });
+window.addEventListener('resize', positionNote);
+bus.on('scalechanging', positionNote);
+function pointerWithin(element: HTMLElement | null, event: MouseEvent) {
+  if (!element || element.hidden) return false;
+  const { left, right, top, bottom } = element.getBoundingClientRect();
+  return right > left && bottom > top &&
+    event.clientX >= left && event.clientX <= right && event.clientY >= top && event.clientY <= bottom;
+}
+
+function noteAtPointer(event: MouseEvent): HTMLElement | null {
+  if (!(event.target instanceof Element)) return null;
+  const note = event.target.closest<HTMLElement>('.textAnnotation[data-annotation-id]');
+  if (note) return note;
+  if (!viewer.container.contains(event.target) || event.target.closest('.editToolbar')) return null;
+  const openNote = notePopover?.id ? noteElement(notePopover.page, notePopover.id) : null;
+  if (pointerWithin(openNote, event)) return openNote;
+  if (!event.target.closest('.highlightEditor, .highlightAnnotation')) return null;
+  // PDF.js can place the interactive highlight layer above the note layer.
+  const page = event.target.closest('.page');
+  for (const element of document.elementsFromPoint(event.clientX, event.clientY)) {
+    const candidate = element.closest<HTMLElement>('.textAnnotation[data-annotation-id]');
+    if (candidate && page?.contains(candidate)) return candidate;
+  }
+  return null;
+}
+
+function pointerWithinOpenNote(event: MouseEvent) {
+  const popover = byId('note-popover');
+  if (event.target instanceof Node && popover.contains(event.target)) return true;
+  if (pointerWithin(popover, event)) return true;
+  return !!notePopover?.id && noteAtPointer(event)?.dataset.annotationId === notePopover.id;
+}
+
+let notePointerStartedOutside = false;
+document.addEventListener('pointerdown', event => {
+  notePointerStartedOutside = !!notePopover && !pointerWithinOpenNote(event);
+}, true);
+document.addEventListener('pointerup', () => {
+  if (notePopover?.editing && !notePointerStartedOutside) window.requestAnimationFrame(positionNote);
+}, true);
+document.addEventListener('click', event => {
+  const startedOutside = notePointerStartedOutside;
+  notePointerStartedOutside = false;
+  // A resize can release outside the editor and dispatch a click on its ancestor.
+  if (!notePopover || pointerWithinOpenNote(event) || (event.detail > 0 && !startedOutside)) return;
+  finishNote();
+}, true);
+
+bus.on('annotationlayerrendered', ({ source, pageNumber }: { source: { div: HTMLElement }; pageNumber: number }) => {
+  for (const [id, note] of newNotes) if (note.page === pageNumber) renderNoteState(pageNumber, id);
+  const notes = source.div.querySelectorAll<HTMLElement>('.annotationLayer .textAnnotation[data-annotation-id]');
+  const noteIds = new Set(Array.from(notes, note => note.id));
+  for (const popup of source.div.querySelectorAll('.popupAnnotation[aria-controls]')) {
+    const controls = popup.getAttribute('aria-controls')!.split(/\s+/);
+    popup.toggleAttribute('data-note-popover', controls.every(id => noteIds.has(id)));
+  }
+  for (const note of notes) {
+    note.setAttribute('role', 'button');
+    note.setAttribute('tabindex', '0');
+    note.toggleAttribute('data-movable', /^\d+R\d*$/.test(note.dataset.annotationId ?? ''));
+    const image = note.querySelector('img');
+    if (image) {
+      image.draggable = false;
+      if (image.src.endsWith('/annotation-comment.svg')) {
+        image.src = noteIconUrl;
+        image.classList.add('pdfsee-note-icon');
+      }
+    }
+    if (noteChanges.get(note.dataset.annotationId ?? '')?.action === 'remove') note.hidden = true;
+    positionMovedNote(note);
+    localizedAttribute(note, 'aria-label', '查看便签');
+  }
+});
+viewer.container.addEventListener('keydown', event => {
+  if (noteMode || tabBusy() || !['Enter', ' '].includes(event.key) || !(event.target instanceof HTMLElement)) return;
+  if (!event.target.matches('.textAnnotation[data-annotation-id]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  void viewNote(event.target).catch(errorStatus);
+}, true);
+
+function positionMovedNote(element: HTMLElement) {
+  const move = noteMoves.get(element.dataset.annotationId ?? '');
+  const view = move && viewer.getPageView(move.page - 1);
+  if (!move || !view || !view.div.contains(element)) {
+    element.style.translate = '';
+    return;
+  }
+  const [x, y] = view.viewport.convertToViewportPoint(0, 0);
+  const [toX, toY] = view.viewport.convertToViewportPoint(move.dx, move.dy);
+  element.style.translate = `${toX - x}px ${toY - y}px`;
+}
+
+let noteDrag: {
+  element: HTMLElement; pointer: number; from: NotePosition; startX: number; startY: number;
+  offsetX: number; offsetY: number; icon: DOMRect; bounds: DOMRect; moved: boolean;
+} | null = null;
+let suppressNoteClick = false;
+viewer.container.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || tabBusy() || noteMode || notePopover?.editing || !(event.target instanceof Element)) return;
+  const element = noteAtPointer(event);
+  if (!element?.hasAttribute('data-movable')) return;
+  if (!element.contains(event.target)) event.stopPropagation();
+  const from = pagePoint(element, event.clientX, event.clientY);
+  const view = from && viewer.getPageView(from.page - 1);
+  if (!from || !view) return;
+  const [offsetX = 0, offsetY = 0] = element.style.translate.split(' ').map(value => Number.parseFloat(value) || 0);
+  noteDrag = {
+    element, pointer: event.pointerId, from, startX: event.clientX, startY: event.clientY,
+    offsetX, offsetY, icon: element.getBoundingClientRect(), bounds: view.div.getBoundingClientRect(), moved: false
+  };
+}, true);
+
+function noteDragOffset(drag: NonNullable<typeof noteDrag>, event: PointerEvent) {
+  const { bounds, icon } = drag;
+  return [
+    Math.max(bounds.left - icon.left, Math.min(event.clientX - drag.startX, bounds.right - icon.right)),
+    Math.max(bounds.top - icon.top, Math.min(event.clientY - drag.startY, bounds.bottom - icon.bottom))
+  ] as const;
+}
+window.addEventListener('pointermove', event => {
+  const drag = noteDrag;
+  if (!drag || event.pointerId !== drag.pointer) return;
+  const [dx, dy] = noteDragOffset(drag, event);
+  if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+  if (!drag.moved) {
+    drag.moved = true;
+    if (notePopover && notePopover.id !== drag.element.dataset.annotationId) dismissNote();
+    drag.element.dataset.dragging = '';
+    drag.element.setPointerCapture(event.pointerId);
+  }
+  drag.element.style.translate = `${drag.offsetX + dx}px ${drag.offsetY + dy}px`;
+  positionNote();
+  event.preventDefault();
+}, { capture: true, passive: false });
+function finishNoteDrag(event: PointerEvent) {
+  const drag = noteDrag;
+  if (!drag || event.pointerId !== drag.pointer) return;
+  noteDrag = null;
+  if (!drag.moved) return;
+  delete drag.element.dataset.dragging;
+  if (event.type === 'pointerup' && !tabBusy()) {
+    suppressNoteClick = true;
+    window.setTimeout(() => { suppressNoteClick = false; }, 0);
+    const id = drag.element.dataset.annotationId;
+    const [dx, dy] = noteDragOffset(drag, event);
+    const to = pagePoint(drag.element, drag.startX + dx, drag.startY + dy);
+    if (id && to) {
+      const previous = noteMoves.get(id);
+      const move: NoteMove = { action: 'move', page: to.page, id, dx: (previous?.dx ?? 0) + to.x - drag.from.x, dy: (previous?.dy ?? 0) + to.y - drag.from.y };
+      const nextMove = Math.hypot(move.dx, move.dy) < 0.01 ? undefined : move;
+      if (Math.hypot(dx, dy) >= 0.01) recordNoteEdit(to.page, id, { ...noteState(id), move: nextMove });
+    }
+  }
+  positionMovedNote(drag.element);
+  positionNote();
+}
+window.addEventListener('pointerup', finishNoteDrag, true);
+window.addEventListener('pointercancel', finishNoteDrag, true);
+
+viewer.container.addEventListener('click', event => {
+  if (suppressNoteClick || !(event.target instanceof Element)) return;
+  if (!noteMode) {
+    const note = noteAtPointer(event);
+    if (note) {
+      event.preventDefault();
+      event.stopPropagation();
+      void viewNote(note).catch(errorStatus);
+    }
+    return;
+  }
+  if (tabBusy() || !doc) return;
+  const position = pagePoint(event.target, event.clientX, event.clientY);
+  if (!position) return;
+  event.preventDefault();
+  event.stopPropagation();
+  setNoteMode(false);
+  showNote({ ...position, text: '', editing: true });
+}, true);
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || event.isComposing) return;
+  if (noteMode) setNoteMode(false);
+  if (notePopover) {
+    dismissNote();
+    refreshPageEditing();
+  }
 });
 
 function clearPageDrop() {
@@ -1259,10 +2028,10 @@ document.addEventListener('drop', event => {
       addFiles(files, tool.kind, tool.multi);
       return;
     }
-    const pdf = files.find(file => file.kind === 'pdf');
-    if (pdf) {
-      files.filter(file => file !== pdf).forEach(releaseUnused);
-      await openDocument(pdf);
+    const pdfs = files.filter(file => file.kind === 'pdf');
+    if (pdfs.length) {
+      files.filter(file => file.kind !== 'pdf').forEach(releaseUnused);
+      for (const file of pdfs) await openDocument(file).catch(errorStatus);
     } else if (files.length) {
       setMode(files[0].kind === 'image' ? 'image' : 'office');
       const tool = tools[files[0].kind === 'image' ? 'image' : 'office'];
@@ -1271,7 +2040,8 @@ document.addEventListener('drop', event => {
   }).catch(errorStatus);
 });
 
-desktop.onFile(file => void openDocument(file));
+let systemOpen: Promise<void> = Promise.resolve();
+desktop.onFile(file => { systemOpen = systemOpen.then(() => openDocument(file)).catch(errorStatus); });
 desktop.onError(errorStatus);
 desktop.onUpdatePrompt(prompt => {
   const dialog = byId<HTMLDialogElement>('update-dialog');
@@ -1309,6 +2079,9 @@ desktop.onUpdateProgress(progress => {
   else meter.value = percent;
 });
 desktop.onMenu(command => {
+  if (command === 'close-window') void closeWindow().catch(errorStatus);
+  if (command === 'save') saveCurrent(false);
+  if (command === 'save-as') saveCurrent(true);
   if (command === 'open') void pickPdf();
   if (command === 'close') closeDocument();
   if (command === 'print') void printDocument();

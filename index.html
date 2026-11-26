@@ -38,6 +38,7 @@
         <button id="open-feedback" class="button secondary" type="button" title="前往小红书反馈"><i class="icon icon-message-square-text" aria-hidden="true"></i>反馈</button>
         <button id="open-file" class="button secondary"><i class="icon icon-folder-open"></i>打开 PDF</button>
       </header>
+      <nav id="document-tabs" aria-label="文档标签页" hidden></nav>
       <section id="home" class="home" aria-label="打开 PDF">
         <div class="welcome">
           <img class="paper-art" src="/images/pdfsee-icon.png" alt="" width="106" height="104">
@@ -72,15 +73,17 @@
           </select>
           <button id="zoom-in" class="square" title="放大" aria-label="放大"><i class="icon icon-plus"></i></button>
           <div class="page-edit-actions">
-            <button id="undo-page-edit" class="square" title="撤销页面编辑" aria-label="撤销页面编辑" hidden><i class="icon icon-undo-2" aria-hidden="true"></i></button>
-            <button id="save-page-edit" class="square" title="另存编辑后的 PDF" aria-label="另存编辑后的 PDF" hidden><i class="icon icon-save" aria-hidden="true"></i></button>
+            <button id="undo-edit" class="square" title="撤销" aria-label="撤销" disabled><i class="icon icon-undo-2" aria-hidden="true"></i></button>
+            <button id="annotation-highlight" class="square" title="高亮文字" aria-label="高亮文字" aria-pressed="false"><i class="icon icon-highlighter" aria-hidden="true"></i></button>
+            <button id="annotation-note" class="square" title="添加便签" aria-label="添加便签" aria-pressed="false"><i class="icon icon-sticky-note" aria-hidden="true"></i></button>
+            <button id="save-document" class="square" title="保存" aria-label="保存" disabled><i class="icon icon-save" aria-hidden="true"></i></button>
+            <button id="save-page-edit" class="square" title="另存为…" aria-label="另存为…"><i class="icon icon-save-all" aria-hidden="true"></i></button>
           </div>
           <div class="reader-actions">
             <button id="rotate" class="square" title="旋转视图" aria-label="旋转视图"><i class="icon icon-rotate-cw"></i></button>
             <button id="find" class="square" title="查找" aria-label="查找"><i class="icon icon-search"></i></button>
             <button id="print-document" class="square" title="打印 PDF" aria-label="打印 PDF"><i class="icon icon-printer" aria-hidden="true"></i></button>
             <button id="export-image" class="square" title="当前页导出 PNG" aria-label="当前页导出 PNG"><i class="icon icon-download"></i></button>
-            <button id="close-file" class="square" title="关闭文档" aria-label="关闭文档"><i class="icon icon-x"></i></button>
           </div>
         </div>
         <div id="find-bar" class="find-bar" hidden>
@@ -95,7 +98,17 @@
             <div class="sidebar-tabs"><button data-panel="thumbnails" class="active">页面</button><button data-panel="outline">目录</button></div>
             <div id="thumbnails" class="side-content"></div><div id="outline" class="side-content" hidden></div>
           </aside>
-          <div class="viewport"><div id="viewer-container" class="viewer-scroll" tabindex="0"><div id="viewer" class="pdfViewer"></div></div></div>
+          <div class="viewport">
+            <div id="viewer-container" class="viewer-scroll" tabindex="0"><div id="viewer" class="pdfViewer"></div></div>
+            <section id="note-popover" aria-label="便签" hidden>
+              <p id="note-body"></p>
+              <textarea id="annotation-text" aria-label="便签内容" placeholder="输入便签内容" rows="3" maxlength="4000" hidden></textarea>
+              <div id="note-actions">
+                <button id="edit-note" class="square" type="button" title="修改" aria-label="修改"><i class="icon icon-pencil" aria-hidden="true"></i></button>
+                <button id="remove-note" class="square" type="button" title="删除便签" aria-label="删除便签"><i class="icon icon-trash-2" aria-hidden="true"></i></button>
+              </div>
+            </section>
+          </div>
         </div>
       </section>
 
