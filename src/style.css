@@ -314,24 +314,49 @@ dialog input { width: 100%; }
 }
 .success-toast .icon { color: #79dca3; font-size: 30px; line-height: 1; }
 
+#print-dialog { width: min(860px, calc(100vw - 40px)); max-height: calc(100vh - 36px); padding: 0; }
+#print-dialog form { margin: 0; }
+.print-header { padding: 15px 22px; border-bottom: 1px solid var(--rule); }
+.print-header h2 { margin: 0; }
+.print-body { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(245px, 1fr); }
+.print-preview { min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--reader-backdrop); border-right: 1px solid var(--rule); }
+.print-stage { container-type: size; position: relative; display: grid; place-items: center; height: clamp(265px, 55vh, 510px); }
+.print-stage .print-sheet {
+  position: relative;
+  width: min(calc(100cqw - 44px), calc((100cqh - 34px) * var(--preview-ratio)));
+  background: #fff;
+  box-shadow: 0 2px 13px #0004;
+}
+.print-page-nav { display: flex; justify-content: center; align-items: center; gap: 13px; padding: 3px 0 10px; }
+.print-page-nav output { min-width: 66px; text-align: center; font-variant-numeric: tabular-nums; }
+.print-settings { padding: 19px 20px 12px; }
+.print-paper-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.print-paper-fields select { min-width: 0; }
+.print-check { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+#print-dialog .print-check input { width: auto; margin: 0; accent-color: var(--accent); }
+.print-scale-options { margin: 13px 0; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; }
+.print-scale-options legend { padding: 0 4px; font-weight: 650; }
+.print-percent { display: grid; grid-template-columns: 1fr 72px; align-items: center; gap: 6px; margin: 4px 0; }
+.print-copies small, #print-layout-summary, #print-preview-message { color: var(--muted); }
+.print-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--rule); }
+.print-footer .dialog-actions { margin: 0; }
+.print-sheet, .print-cell { overflow: hidden; }
+.print-cell, .print-cell img { position: absolute; }
+.print-cell img { top: 50%; left: 50%; display: block; max-width: none; }
+
 #print-pages { display: none; }
 
 @media print {
   html, body { background: #fff; }
   body > :not(#print-pages) { display: none !important; }
   #print-pages { display: block; }
-  #print-pages > div {
+  #print-pages > .print-sheet {
+    position: relative;
     width: calc(var(--paper-width) - 1pt);
     height: calc(var(--paper-height) - 1pt);
     break-inside: avoid;
   }
-  #print-pages > div + div { break-before: page; }
-  #print-pages img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
+  #print-pages > .print-sheet + .print-sheet { break-before: page; }
 }
 
 .ocr-layer {

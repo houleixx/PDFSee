@@ -7,6 +7,7 @@ import 'pdfjs-dist/legacy/web/pdf_viewer.css';
 import 'lucide-static/font/lucide.css';
 import './style.css';
 import { applyLanguage, localizedAttribute, localizedText, registerStaticTranslations, translate, type Language } from './i18n';
+import { fillPrintSheet, printLayout } from './print-layout';
 import { createPageOcr, type RecognizedLine } from './page-ocr';
 
 type Kind = 'pdf' | 'image' | 'office';
@@ -14,7 +15,7 @@ type FileInfo = { id: string; kind: Kind; name: string; size: number; key: strin
 type Output = { name: string; location: string; count?: number; kind?: 'images' };
 type ToolResult = Output & { message?: string } | { message: string };
 type PdfFormat = 'pages' | 'long' | 'flat' | 'pptx' | 'docx';
-type ToolJob = { mode: string; ids: string[]; spec: string; groupSize: number; rotation: number; paper: string };
+type ToolJob = { mode: string; ids: string[]; spec: string; groupSize: number; rotation: number; paper: string; bookmarks: string; toc: string };
 type NoteAdd = { action: 'add'; page: number; x: number; y: number; text: string };
 type NoteChange =
   | { action: 'remove'; page: number; id: string }
@@ -37,10 +38,11 @@ type UpdatePrompt = {
 };
 type Bridge = {
   canRecognizePages: boolean;
+  usesNativePrintPanel: boolean;
   recognizePage(bytes: Uint8Array): Promise<RecognizedLine[]>;
   setToolSidebarHidden(hidden: boolean): Promise<void>;
   openFeedback(): Promise<void>;
-  printDocument(): Promise<boolean>;
+  printDocument(title: string): Promise<boolean>;
   pick(kind: Kind, multi: boolean): Promise<FileInfo[]>;
   drop(files: File[]): Promise<FileInfo[]>;
   read(id: string, start: number, end: number): Promise<Uint8Array>;
@@ -103,7 +105,7 @@ click('toggle-tool-sidebar', () => {
 const sizeText = (size: number) => size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`;
 
 const tools = {
-  merge: { title: '合并 PDF', icon: 'layers', kind: 'pdf', multi: true, description: '按列表顺序把多份 PDF 合成一份。', hint: '至少添加两份 PDF', submit: '合并并保存' },
+  merge: { title: '合并 PDF', icon: 'layers', kind: 'pdf', multi: true, description: '按列表顺序把多份 PDF 合成一份。', hint: '可另存单份 PDF 并添加导航', submit: '合并并保存' },
   split: { title: '拆分 PDF', icon: 'scissors', kind: 'pdf', multi: false, description: '按固定页数把一份 PDF 分成多个文件。', hint: '支持指定页码范围', submit: '选择目录并拆分' },
   extract: { title: '提取页面', icon: 'files', kind: 'pdf', multi: false, description: '把选中的页面导出为一份新 PDF。', hint: '选择一份 PDF', submit: '提取并保存' },
   organize: { title: '整理页面', icon: 'layout-grid', kind: 'pdf', multi: false, description: '按指定顺序排列页面，可删除不需要的页或旋转导出的页。', hint: '选择一份 PDF', submit: '保存整理后的 PDF' },
@@ -642,6 +644,8 @@ function setMode(next: Mode, format = pdfFormat) {
   byId('split-options').hidden = mode !== 'split';
   byId('rotation-options').hidden = mode !== 'organize';
   byId('paper-options').hidden = mode !== 'image';
+  byId('merge-bookmark-options').hidden = mode !== 'merge';
+  byId('merge-toc-options').hidden = mode !== 'merge';
   (byId('tool-form') as HTMLFormElement).reset();
   if (mode === 'raster') refreshPdfFormat();
   refreshFiles();
@@ -1006,6 +1010,107 @@ bus.on('updatefindcontrolstate', ({ state, matchesCount }) => {
   else findCount({ matchesCount });
 });
 
+async function choosePrintOptions(source: NonNullable<typeof doc>, rotation: number,
+  printAnnotationStorage: NonNullable<typeof doc>['annotationStorage']['print']) {
+  const dialog = byId<HTMLDialogElement>('print-dialog');
+  const form = dialog.querySelector('form')!;
+  const sheet = byId('print-preview-sheet');
+  const stage = byId('print-stage');
+  const message = byId('print-preview-message');
+  const previous = button('print-prev');
+  const next = button('print-next');
+  const proceed = button('print-continue');
+  const percent = input('print-scale');
+  const modeInputs = Array.from(form.querySelectorAll<HTMLInputElement>('[name="print-mode"]'));
+  const summary = byId('print-layout-summary');
+  const settings = () => ({
+    mode: modeInputs.find(control => control.checked)!.value,
+    scale: percent.valueAsNumber / 100,
+    paper: select('print-paper').value,
+    orientation: select('print-orientation').value,
+    autoRotate: input('print-auto-rotate').checked,
+    copies: Number(select('print-copies').value)
+  });
+  let number = viewer.currentPageNumber;
+  let revision = 0;
+  let preview: { width: number; height: number; url: string } | undefined;
+  let task: ReturnType<PdfPage['render']> | undefined;
+
+  function updateLayout() {
+    const options = settings();
+    percent.disabled = byId('print-percent').hidden = options.mode !== 'custom';
+    proceed.disabled = !preview || !form.checkValidity();
+    if (!preview || proceed.disabled) {
+      localizedText(summary, '');
+      return;
+    }
+    const layout = printLayout(preview, options);
+    sheet.style.setProperty('--preview-ratio', String(layout.paper.width / layout.paper.height));
+    fillPrintSheet(sheet, layout, preview.url);
+    localizedText(summary, '打印比例 {0}%'.replace('{0}', String(Math.round(layout.scale * 100))));
+  }
+
+  async function loadPreview() {
+    const request = ++revision;
+    task?.cancel();
+    preview = undefined;
+    updateLayout();
+    previous.disabled = number === 1;
+    next.disabled = number === source.numPages;
+    byId('print-page-number').textContent = `${number} / ${source.numPages}`;
+    sheet.hidden = true;
+    message.hidden = false;
+    stage.setAttribute('aria-busy', 'true');
+    localizedText(message, '正在生成预览…');
+    try {
+      const page = await source.getPage(number);
+      if (request !== revision) return;
+      const angle = (page.rotate + rotation) % 360;
+      const { width, height } = page.getViewport({ scale: 1, rotation: angle });
+      const viewport = page.getViewport({ scale: 1000 / Math.max(width, height), rotation: angle });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      task = page.render({ canvas, viewport, intent: 'print', background: '#fff',
+        annotationMode: AnnotationMode.ENABLE_STORAGE, printAnnotationStorage });
+      await task.promise;
+      if (request !== revision) return;
+      preview = { width, height, url: canvas.toDataURL() };
+      updateLayout();
+      sheet.hidden = false;
+      message.hidden = true;
+    } catch {
+      if (request !== revision) return;
+      localizedText(message, '无法生成打印预览。');
+    } finally {
+      if (request === revision) {
+        task = undefined;
+        stage.setAttribute('aria-busy', 'false');
+      }
+    }
+  }
+
+  form.reset();
+  dialog.returnValue = '';
+  form.oninput = updateLayout;
+  previous.onclick = () => { number--; void loadPreview(); };
+  next.onclick = () => { number++; void loadPreview(); };
+  button('print-cancel').onclick = () => dialog.close('cancel');
+  try {
+    await new Promise<void>(resolve => {
+      dialog.showModal();
+      dialog.addEventListener('close', () => resolve(), { once: true });
+      void loadPreview();
+    });
+    return dialog.returnValue === 'print' && form.checkValidity() ? settings() : null;
+  } finally {
+    revision++;
+    task?.cancel();
+    form.oninput = previous.onclick = next.onclick = button('print-cancel').onclick = null;
+    sheet.replaceChildren();
+  }
+}
+
 async function printDocument() {
   if (printing) return;
   const source = doc;
@@ -1027,8 +1132,8 @@ async function printDocument() {
   const active = () => doc === source && mode === 'read';
 
   try {
-    status('正在准备打印…');
     const permissions = await source.getPermissions();
+    if (!active()) return;
     const { PRINT, PRINT_HIGH_QUALITY } = pdfjs.PermissionFlag;
     if (permissions && !permissions.includes(PRINT) && !permissions.includes(PRINT_HIGH_QUALITY)) {
       throw new Error('这份 PDF 禁止打印。');
@@ -1036,15 +1141,21 @@ async function printDocument() {
 
     const dpi = !permissions || permissions.includes(PRINT_HIGH_QUALITY) ? 160 : 150;
     const printAnnotationStorage = source.annotationStorage.print;
+    const options = desktop.usesNativePrintPanel
+      ? { paper: 'original', orientation: 'auto', autoRotate: false, mode: 'custom', scale: 1, copies: 1 }
+      : await choosePrintOptions(source, rotation, printAnnotationStorage);
+    if (!options || !active()) return;
     for (let number = 1; number <= source.numPages; number++) {
       if (!active()) return;
       status(`正在准备打印 · ${number} / ${source.numPages}`);
       const page = await source.getPage(number);
       if (!active()) return;
       const angle = (page.rotate + rotation) % 360;
-      const paper = page.getViewport({ scale: 1, rotation: angle });
-      const scale = Math.min(dpi / 72, 5000 / Math.max(paper.width, paper.height),
-        Math.sqrt(16000000 / (paper.width * paper.height)));
+      const pageSize = page.getViewport({ scale: 1, rotation: angle });
+      const layout = printLayout(pageSize, options);
+      const { paper } = layout;
+      const scale = Math.min(dpi / 72, 5000 / Math.max(pageSize.width, pageSize.height),
+        Math.sqrt(16000000 / (pageSize.width * pageSize.height)));
       const viewport = page.getViewport({ scale, rotation: angle });
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
@@ -1067,17 +1178,16 @@ async function printDocument() {
       sheet.style.setProperty('page', pageName);
       sheet.style.setProperty('--paper-width', width);
       sheet.style.setProperty('--paper-height', height);
-      const image = new Image();
+      sheet.className = 'print-sheet';
       const url = URL.createObjectURL(blob);
       urls.push(url);
-      image.src = url;
-      await image.decode();
-      sheet.append(image);
+      fillPrintSheet(sheet, layout, url);
       container.append(sheet);
+      await Promise.all(Array.from(sheet.querySelectorAll('img'), image => image.decode()));
     }
 
     if (!active()) return;
-    const sent = await desktop.printDocument();
+    const sent = await desktop.printDocument(current?.name ?? 'PDFSee');
     if (active()) {
       status(sent ? '已提交打印。' : '已取消打印。');
       if (sent) showSuccessToast('已提交打印');
@@ -1298,9 +1408,15 @@ function listAction(label: string, glyph: string, action: () => void, disabled =
   return control;
 }
 
+function canRunTool() {
+  const bookmarks = select('merge-bookmarks').value;
+  const singleFileAllowed = bookmarks === 'file' || bookmarks === 'group' || select('merge-toc').value !== 'none';
+  return selections.length >= (mode === 'merge' && !singleFileAllowed ? 2 : 1);
+}
+
 function showToolSelectionStatus() {
   const count = selections.length;
-  if (mode === 'merge' && count < 2) status(`已添加 ${count} 份 PDF，至少需要 2 份。`);
+  if (mode === 'merge' && count === 1 && !canRunTool()) status('请再添加一份 PDF，或选择创建书签或生成目录页。');
   else status(count ? `已选择 ${count} 个文件` : '尚未添加文件。');
 }
 
@@ -1334,7 +1450,8 @@ function refreshFiles() {
     }, running));
     list.append(item);
   });
-  button('run-tool').disabled = running || selections.length < (mode === 'merge' ? 2 : 1);
+  button('run-tool').disabled = running || !canRunTool();
+  if (mode === 'merge') localizedText(byId('run-label'), selections.length === 1 && canRunTool() ? '另存 PDF' : tools.merge.submit);
   button('tool-picker').disabled = running;
   button('use-current').disabled = running;
   if (mode === 'raster') {
@@ -1383,7 +1500,7 @@ async function pickToolFiles() {
 
 async function runTool(event: SubmitEvent) {
   event.preventDefault();
-  if (running || mode === 'read' || !selections.length) return;
+  if (running || mode === 'read' || !canRunTool()) return;
   running = true;
   button('cancel-images').hidden = mode !== 'raster';
   const controls = Array.from(byId('tool-form').querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select'));
@@ -1394,7 +1511,8 @@ async function runTool(event: SubmitEvent) {
   try {
     success(mode === 'raster' ? await exportImages() : await desktop.execute({
       mode, ids: selections.map(file => file.id), spec: input('page-spec').value,
-      groupSize: Number(input('group-size').value), rotation: Number(select('rotation').value), paper: select('paper').value
+      groupSize: Number(input('group-size').value), rotation: Number(select('rotation').value), paper: select('paper').value,
+      bookmarks: select('merge-bookmarks').value, toc: select('merge-toc').value
     }), successLabel);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') status('已取消转换。');
@@ -1429,6 +1547,12 @@ click('use-current', () => {
     addFiles([current], 'pdf', tools[mode].multi);
   }
 });
+for (const id of ['merge-bookmarks', 'merge-toc']) {
+  select(id).onchange = () => {
+    refreshFiles();
+    showToolSelectionStatus();
+  };
+}
 select('image-range').onchange = () => {
   byId('page-options').hidden = select('image-range').value !== 'custom';
   if (!byId('page-options').hidden) input('page-spec').focus();

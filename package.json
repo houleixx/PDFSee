@@ -1,6 +1,6 @@
 {
   "name": "pdfsee",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Local PDF reader and page tools",
   "main": "desktop/main.cjs",
@@ -21,6 +21,7 @@
     "files": [
       "dist/**",
       "!dist/pdfsee-ocr",
+      "!dist/PDFSee Print.app/**",
       "desktop/**",
       "package.json",
       "LICENSE"
@@ -40,6 +41,10 @@
         {
           "from": "dist/pdfsee-ocr",
           "to": "pdfsee-ocr"
+        },
+        {
+          "from": "dist/PDFSee Print.app",
+          "to": "PDFSee Print.app"
         }
       ]
     },

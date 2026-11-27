@@ -1,5 +1,5 @@
 const { readFile } = require('node:fs/promises');
-const { extname } = require('node:path');
+const { basename, extname } = require('node:path');
 
 function parsePages(spec, count) {
   if (!Number.isInteger(count) || count < 1) throw new Error('文档没有可用页面。');
@@ -89,14 +89,34 @@ async function editPages(paths, { action, page, gap }) {
   return output.save();
 }
 
-async function mergeFiles(paths) {
-  const { PDFDocument } = require('pdf-lib');
+async function mergeFiles(paths, options = {}, renderToc) {
+  const { PDFDocument, PDFName } = require('pdf-lib');
+  const { mergeOptions } = require('./merge-options.cjs');
+  const { readBookmarks, writeBookmarks, insertToc } = require('./merge-navigation.cjs');
+  const { bookmarks, toc } = mergeOptions(options.bookmarks, options.toc);
   const output = await PDFDocument.create();
+  const outline = [];
+  const directory = [];
   for (const path of paths) {
     const source = await loadPdf(path);
-    for (const page of await output.copyPages(source, source.getPageIndices())) output.addPage(page);
+    const index = output.getPageCount();
+    const copies = await output.copyPages(source, source.getPageIndices());
+    if (!copies.length) continue;
+    copies.forEach(page => output.addPage(page));
+    const filename = basename(path, extname(path));
+    const children = bookmarks === 'retain' || bookmarks === 'group' ? readBookmarks(source, copies) : [];
+    if (bookmarks === 'retain') outline.push(...children);
+    if (bookmarks === 'file' || bookmarks === 'group') {
+      outline.push({ title: filename, dest: [copies[0].ref, PDFName.of('Fit')], children });
+    }
+    if (toc !== 'none') {
+      const title = toc === 'title' ? source.getTitle()?.trim() || filename : filename;
+      directory.push({ title, index, page: copies[0] });
+    }
   }
   if (!output.getPageCount()) throw new Error('没有可导出的页面。');
+  if (directory.length) await insertToc(output, directory, renderToc);
+  writeBookmarks(output, outline);
   return output.save();
 }
 

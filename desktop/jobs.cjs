@@ -4,9 +4,12 @@ const { loadPdf, copyPages, parsePages, mergeFiles, imagesToPdf, editPages } = r
 const { convertOffice } = require('./office.cjs');
 const { writePdfFormat } = require('./pdf-formats.cjs');
 
-async function run({ mode, paths, paper, spec, rotation, groupSize, directory, office, edit }) {
+async function run({ mode, paths, paper, spec, rotation, groupSize, directory, office, edit, merge }) {
   if (mode === 'edit-pages') return editPages(paths, edit);
-  if (mode === 'merge') return mergeFiles(paths);
+  if (mode === 'merge') return mergeFiles(paths, merge, tocEntries => new Promise(resolve => {
+    process.parentPort.once('message', ({ data }) => resolve(data.bytes));
+    process.parentPort.postMessage({ tocEntries });
+  }));
   if (mode === 'image') return imagesToPdf(paths, paper);
   if (mode === 'office') return convertOffice(paths[0], office);
 

@@ -142,6 +142,25 @@
               <label for="paper">纸张尺寸</label>
               <select id="paper"><option value="original">适合图片尺寸</option><option value="a4">A4</option><option value="letter">Letter</option></select>
             </div>
+            <div id="merge-bookmark-options" class="field" hidden>
+              <label for="merge-bookmarks">书签管理</label>
+              <select id="merge-bookmarks">
+                <option value="discard">不保留书签</option>
+                <option value="retain">保留原书签</option>
+                <option value="file">每份文件创建一个书签</option>
+                <option value="group">按文件分组并保留原书签</option>
+              </select>
+              <small>书签显示在阅读器侧栏的「目录」中。</small>
+            </div>
+            <div id="merge-toc-options" class="field" hidden>
+              <label for="merge-toc">目录生成</label>
+              <select id="merge-toc">
+                <option value="none">不生成</option>
+                <option value="filename">按文件名生成</option>
+                <option value="title">按 PDF 标题生成</option>
+              </select>
+              <small>在输出 PDF 开头插入可点击的目录页。</small>
+            </div>
             <div class="tool-actions">
               <button id="run-tool" class="button primary" type="submit"><i class="icon icon-arrow-right"></i><span id="run-label">导出</span></button>
               <button id="cancel-images" class="button secondary" type="button" hidden>取消转换</button>
@@ -165,6 +184,56 @@
     <span id="success-toast-text"></span>
   </div>
   <div id="print-pages" aria-hidden="true"></div>
+  <dialog id="print-dialog" aria-labelledby="print-title">
+    <form method="dialog">
+      <header class="print-header"><h2 id="print-title">打印预览</h2></header>
+      <div class="print-body">
+        <section class="print-preview" aria-label="纸张预览">
+          <div id="print-stage" class="print-stage" aria-busy="true">
+            <div id="print-preview-sheet" class="print-sheet" hidden></div>
+            <span id="print-preview-message" role="status">正在生成预览…</span>
+          </div>
+          <div class="print-page-nav">
+            <button type="button" id="print-prev" class="square" aria-label="上一页"><i class="icon icon-chevron-left"></i></button>
+            <output id="print-page-number"></output>
+            <button type="button" id="print-next" class="square" aria-label="下一页"><i class="icon icon-chevron-right"></i></button>
+          </div>
+        </section>
+        <section class="print-settings" aria-label="打印设置">
+          <div class="print-paper-fields">
+            <div class="field"><label for="print-paper">纸张大小</label>
+              <select id="print-paper"><option value="a4">A4</option><option value="letter">Letter</option><option value="original">原始页面尺寸</option></select>
+            </div>
+            <div class="field"><label for="print-orientation">方向</label>
+              <select id="print-orientation"><option value="auto">自动</option><option value="portrait">纵向</option><option value="landscape">横向</option></select>
+            </div>
+          </div>
+          <label class="print-check"><input id="print-auto-rotate" type="checkbox" checked>自动旋转内容</label>
+          <fieldset class="print-scale-options">
+            <legend>缩放方式</legend>
+            <label class="print-check"><input type="radio" name="print-mode" value="fit" checked>适合纸张（完整打印）</label>
+            <label class="print-check"><input type="radio" name="print-mode" value="fill">填满纸张（裁切边缘）</label>
+            <label class="print-check"><input type="radio" name="print-mode" value="custom">自定义缩放</label>
+            <label class="print-percent" for="print-scale" id="print-percent" hidden>
+              <span>打印缩放（%）</span>
+              <input id="print-scale" type="number" min="10" max="200" step="1" value="100" required disabled>
+            </label>
+          </fieldset>
+          <div class="field print-copies"><label for="print-copies">每页份数</label>
+            <select id="print-copies"><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option><option>9</option><option>16</option></select>
+            <small>在同一张纸上重复打印当前页内容。</small>
+          </div>
+        </section>
+      </div>
+      <footer class="print-footer">
+        <span id="print-layout-summary"></span>
+        <div class="dialog-actions">
+          <button id="print-cancel" class="button secondary" type="button">取消</button>
+          <button id="print-continue" class="button primary" value="print">继续打印</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
   <dialog id="update-dialog" aria-labelledby="update-title" aria-describedby="update-detail">
     <form method="dialog">
       <div class="dialog-heading">

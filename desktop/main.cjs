@@ -1,3 +1,5 @@
+const { mergeOptions, addsNavigation } = require('./merge-options.cjs');
+const { renderMergeToc } = require('./merge-toc.cjs');
 const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, net, protocol, screen, shell, utilityProcess } = require('electron');
 const { readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { access, chmod, copyFile, mkdtemp, open, readFile, realpath, rename, rm, stat, writeFile } = require('node:fs/promises');
@@ -225,7 +227,15 @@ handle('recognize-page', (_owner, bytes) => {
 function runWorker(payload) {
   return new Promise((resolve, reject) => {
     const worker = utilityProcess.fork(join(__dirname, 'jobs.cjs'), [], { serviceName: 'PDFSee 文档处理' });
-    worker.once('message', ({ value, error }) => {
+    worker.on('message', async ({ value, error, tocEntries }) => {
+      if (tocEntries) {
+        try { worker.postMessage({ bytes: await renderMergeToc(tocEntries, language === 'en' ? 'Table of Contents' : '目录') }); }
+        catch {
+          worker.kill();
+          reject(new Error('无法生成目录页。'));
+        }
+        return;
+      }
       worker.kill();
       if (error) reject(new Error(error));
       else resolve(value);
@@ -306,7 +316,8 @@ async function execute(owner, job) {
     if (!Object.hasOwn(kinds, job?.mode) || !Array.isArray(job.ids) || !job.ids.length || job.ids.length > 300) {
       throw new Error('请选择要处理的文件。');
     }
-    if (job.mode === 'merge' && job.ids.length < 2) throw new Error('请至少添加两份 PDF。');
+    const merge = mergeOptions(job.bookmarks, job.toc);
+    if (job.mode === 'merge' && job.ids.length < 2 && !addsNavigation(merge)) throw new Error('请至少添加两份 PDF。');
     if (!['merge', 'image'].includes(job.mode) && job.ids.length !== 1) throw new Error('请选择一份文件。');
     const files = job.ids.map(id => getFile(id, owner, kinds[job.mode]));
     const paths = files.map(file => file.path);
@@ -337,7 +348,7 @@ async function execute(owner, job) {
     const path = await chooseOutput(join(dirname(first), `${stem}${suffix}.pdf`));
     if (!path) return null;
     await ensureDifferent(path, files.flatMap(file => file.sources ?? [file.path]));
-    await saveAtomically(path, outputPath => runWorker({ mode, paths, spec, rotation, paper, office, outputPath }));
+    await saveAtomically(path, outputPath => runWorker({ mode, paths, spec, rotation, paper, office, merge, outputPath }));
     outputs.add(path);
     return { name: basename(path), location: path };
   } finally {
@@ -363,9 +374,33 @@ handle('set-tool-sidebar-hidden', (_owner, hidden) => {
 
 handle('open-feedback', () => shell.openExternal('https://pdfsee.pages.dev/feedback'));
 
-handle('print-document', owner => {
+handle('print-document', async (owner, title) => {
   const contents = window?.webContents;
   if (contents?.id !== owner) throw new Error('打印窗口已关闭。');
+  if (process.platform === 'darwin') {
+    const directory = await mkdtemp(join(app.getPath('temp'), 'pdfsee-print-'));
+    try {
+      const path = join(directory, 'print.pdf');
+      const buffer = await contents.printToPDF({ preferCSSPageSize: true, printBackground: true });
+      await writeFile(path, buffer, { mode: 0o600 });
+      const helper = join(app.isPackaged ? process.resourcesPath : dist, 'PDFSee Print.app', 'Contents', 'MacOS', 'pdfsee-print');
+      const jobTitle = typeof title === 'string' ? title.replaceAll('\0', '').slice(0, 255) : 'PDFSee';
+      return await new Promise((resolve, reject) => {
+        const systemLanguage = language === 'zh-CN' ? 'zh-Hans' : 'en';
+        const args = [path, jobTitle, language, '-AppleLanguages', `(${systemLanguage})`];
+        const child = execFile(helper, args, error => {
+          if (!error) resolve(true);
+          else if (error.code === 2) resolve(false);
+          else reject(new Error('无法打开系统打印窗口。'));
+        });
+        const cancel = () => child.kill();
+        contents.once('destroyed', cancel);
+        child.once('close', () => contents.removeListener('destroyed', cancel));
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
   return new Promise((resolve, reject) => {
     contents.print({ printBackground: true, margins: { marginType: 'none' } }, (success, reason) => {
       if (success) resolve(true);
