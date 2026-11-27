@@ -1,6 +1,6 @@
 {
   "name": "pdfsee",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Local PDF reader and page tools",
   "main": "desktop/main.cjs",
@@ -21,6 +21,7 @@
     "files": [
       "dist/**",
       "!dist/pdfsee-ocr",
+      "!dist/pdfsee-default-pdf",
       "!dist/PDFSee Print.app/**",
       "desktop/**",
       "package.json",
@@ -45,6 +46,17 @@
         {
           "from": "dist/PDFSee Print.app",
           "to": "PDFSee Print.app"
+        },
+        {
+          "from": "dist/pdfsee-default-pdf",
+          "to": "pdfsee-default-pdf"
+        }
+      ],
+      "fileAssociations": [
+        {
+          "ext": "pdf",
+          "name": "PDF 文档",
+          "role": "Viewer"
         }
       ]
     },
@@ -55,15 +67,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "PDFSee-windows-${version}.${ext}"
-    },
-    "fileAssociations": [
-      {
-        "ext": "pdf",
-        "name": "PDF 文档",
-        "role": "Viewer"
-      }
-    ]
+      "artifactName": "PDFSee-windows-${version}.${ext}",
+      "include": "build/installer.nsh"
+    }
   },
   "dependencies": {
     "docx": "9.5.1",

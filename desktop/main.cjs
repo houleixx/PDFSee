@@ -13,6 +13,7 @@ const { findOffice } = require('./office.cjs');
 const { findInstaller, downloadInstaller } = require('./office-download.cjs');
 const { createUpdater } = require('./updates.cjs');
 const translations = require('./translations.json');
+const { isDefaultPdfApp, macAssociation, windowsDefaultSettings } = require('./default-pdf.cjs');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'pdfsee', privileges: {
   standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true
@@ -204,6 +205,60 @@ function handle(channel, callback) {
     }
   });
 }
+
+const defaultPdfPromptPath = () => join(app.getPath('userData'), 'default-pdf-prompt-dismissed');
+let settingDefaultPdf = false;
+
+handle('should-prompt-default-pdf', async () => {
+  if (!app.isPackaged || !['darwin', 'win32'].includes(process.platform)) return false;
+  try {
+    if (readFileSync(defaultPdfPromptPath(), 'utf8') === '1') return false;
+  } catch (error) {
+    if (error.code !== 'ENOENT') return false;
+  }
+  try {
+    return !(await isDefaultPdfApp());
+  } catch (error) {
+    console.warn('Default PDF association query failed:', error.message);
+    return false;
+  }
+});
+
+handle('dismiss-default-pdf', () => {
+  writeFileSync(defaultPdfPromptPath(), '1');
+});
+
+async function setDefaultPdf() {
+  if (settingDefaultPdf) return;
+  settingDefaultPdf = true;
+  try {
+    if (process.platform === 'win32') {
+      const uri = await windowsDefaultSettings();
+      try {
+        await shell.openExternal(uri);
+      } catch {
+        await shell.openExternal('ms-settings:defaultapps');
+      }
+    } else if (process.platform === 'darwin') {
+      if (app.isPackaged && await macAssociation('set')) return;
+      void showDefaultPdfInstructions();
+    }
+  } catch (error) {
+    console.warn('Default PDF association request failed:', error.message);
+    void showDefaultPdfInstructions();
+  } finally {
+    settingDefaultPdf = false;
+  }
+}
+
+function showDefaultPdfInstructions() {
+  const detail = process.platform === 'darwin'
+    ? '在 Finder 中选中任意 PDF，打开「显示简介」，在「打开方式」中选择已安装的 PDFSee，再点击「全部更改」。'
+    : '打开 Windows 设置中的「应用」→「默认应用」，搜索 .pdf 并选择 PDFSee。';
+  return showWindowPrompt({ type: 'info', message: '设为默认 PDF 阅读器', detail });
+}
+
+handle('set-default-pdf', () => setDefaultPdf());
 
 handle('recognize-page', (_owner, bytes) => {
   if (process.platform !== 'darwin' || !(bytes instanceof Uint8Array) || bytes.length > 20 * 1024 * 1024) {
@@ -720,6 +775,10 @@ function installMenu() {
     if (!window) createWindow();
     void checkForUpdates();
   } };
+  const defaultPdfItem = { label: t('设为默认 PDF 阅读器'), click: () => {
+    if (!window) createWindow();
+    void setDefaultPdf().then(() => window?.webContents.send('menu', 'refresh-default-pdf'));
+  } };
   const languageItem = {
     label: t('语言'),
     submenu: Object.entries(languages).map(([value, label]) => ({
@@ -730,7 +789,7 @@ function installMenu() {
     ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
       { label: t('关于 PDFSee'), click: () => void showWindowPrompt({
         type: 'info', message: '关于 PDFSee', detail: app.getVersion()
-      }) }, updateItem, languageItem, { type: 'separator' },
+      }) }, updateItem, defaultPdfItem, languageItem, { type: 'separator' },
       { role: 'services', label: t('服务') }, { type: 'separator' },
       { role: 'hide', label: t('隐藏 PDFSee') }, { role: 'hideOthers', label: t('隐藏其他应用') }, { role: 'unhide', label: t('显示全部') },
       { type: 'separator' }, { role: 'quit', label: t('退出 PDFSee') }
@@ -743,7 +802,7 @@ function installMenu() {
       { label: t('关闭文档'), accelerator: 'CmdOrCtrl+Shift+W', click: send('close') },
       { role: 'close', label: t('关闭窗口') },
       { type: 'separator' },
-      ...(process.platform === 'win32' ? [languageItem] : []),
+      ...(process.platform === 'win32' ? [defaultPdfItem, languageItem] : []),
       { role: 'quit', label: t('退出') }
     ] },
     { label: t('编辑'), submenu: [{ role: 'copy', label: t('复制') }, { role: 'selectAll', label: t('全选') },

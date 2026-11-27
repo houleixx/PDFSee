@@ -32,11 +32,20 @@
     </aside>
 
     <main class="main">
-      <header class="masthead">
-        <button id="toggle-tool-sidebar" class="square" type="button" aria-controls="tool-sidebar" aria-expanded="true" aria-label="隐藏工具栏" title="隐藏工具栏"><i class="icon icon-panel-left-close" aria-hidden="true"></i></button>
-        <div id="section-title">阅读 PDF</div>
-        <button id="open-feedback" class="button secondary" type="button" title="前往小红书反馈"><i class="icon icon-message-square-text" aria-hidden="true"></i>反馈</button>
-        <button id="open-file" class="button secondary"><i class="icon icon-folder-open"></i>打开 PDF</button>
+      <header class="main-header">
+        <div class="masthead">
+          <button id="toggle-tool-sidebar" class="square" type="button" aria-controls="tool-sidebar" aria-expanded="true" aria-label="隐藏工具栏" title="隐藏工具栏"><i class="icon icon-panel-left-close" aria-hidden="true"></i></button>
+          <div id="section-title">阅读 PDF</div>
+          <button id="open-feedback" class="button secondary" type="button" title="前往小红书反馈"><i class="icon icon-message-square-text" aria-hidden="true"></i>反馈</button>
+          <button id="open-file" class="button secondary"><i class="icon icon-folder-open"></i>打开 PDF</button>
+        </div>
+        <div id="default-pdf-prompt" hidden>
+          <span>将 PDFSee 设为默认 PDF 阅读器，以后双击 PDF 就能直接打开。</span>
+          <div class="default-pdf-actions">
+            <button id="set-default-pdf" class="button primary" type="button">设为默认</button>
+            <button id="dismiss-default-pdf" class="button secondary" type="button">不再提示</button>
+          </div>
+        </div>
       </header>
       <nav id="document-tabs" aria-label="文档标签页" hidden></nav>
       <section id="home" class="home" aria-label="打开 PDF">

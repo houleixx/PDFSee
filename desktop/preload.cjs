@@ -8,6 +8,9 @@ async function invoke(channel, ...args) {
 
 contextBridge.exposeInMainWorld('desktop', {
   setToolSidebarHidden: hidden => invoke('set-tool-sidebar-hidden', hidden),
+  shouldPromptDefaultPdf: () => invoke('should-prompt-default-pdf'),
+  setDefaultPdf: () => invoke('set-default-pdf'),
+  dismissDefaultPdf: () => invoke('dismiss-default-pdf'),
   openFeedback: () => invoke('open-feedback'),
   canRecognizePages: process.platform === 'darwin',
   usesNativePrintPanel: process.platform === 'darwin',

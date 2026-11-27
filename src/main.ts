@@ -64,6 +64,9 @@ type Bridge = {
   answerUpdatePrompt(id: string, choice: number): Promise<void>;
   onUpdatePrompt(callback: (prompt: UpdatePrompt) => void): void;
   onUpdateProgress(callback: (progress: UpdateProgress | null) => void): void;
+  shouldPromptDefaultPdf(): Promise<boolean>;
+  setDefaultPdf(): Promise<void>;
+  dismissDefaultPdf(): Promise<void>;
   onMenu(callback: (command: string) => void): void;
   getLanguage(): Promise<Language>;
   onLanguage(callback: (language: Language) => void): void;
@@ -2220,7 +2223,37 @@ desktop.onUpdateProgress(progress => {
   if (percent === null) meter.removeAttribute('value');
   else meter.value = percent;
 });
+const defaultPdfPrompt = byId('default-pdf-prompt');
+let defaultPdfCheck = 0;
+let defaultPdfDismissed = false;
+
+async function refreshDefaultPdfPrompt() {
+  const check = ++defaultPdfCheck;
+  const show = await desktop.shouldPromptDefaultPdf();
+  if (check === defaultPdfCheck && !defaultPdfDismissed) defaultPdfPrompt.hidden = !show;
+}
+
+click('set-default-pdf', () => {
+  const action = button('set-default-pdf');
+  action.disabled = true;
+  void desktop.setDefaultPdf().then(refreshDefaultPdfPrompt).catch(errorStatus)
+    .finally(() => { action.disabled = false; });
+});
+click('dismiss-default-pdf', () => {
+  const action = button('dismiss-default-pdf');
+  action.disabled = true;
+  void desktop.dismissDefaultPdf().then(() => {
+    defaultPdfDismissed = true;
+    defaultPdfPrompt.hidden = true;
+  }).catch(errorStatus).finally(() => { action.disabled = false; });
+});
+window.addEventListener('focus', () => {
+  if (!defaultPdfPrompt.hidden) void refreshDefaultPdfPrompt().catch(errorStatus);
+});
+void refreshDefaultPdfPrompt().catch(errorStatus);
+
 desktop.onMenu(command => {
+  if (command === 'refresh-default-pdf') void refreshDefaultPdfPrompt().catch(errorStatus);
   if (command === 'close-window') void closeWindow().catch(errorStatus);
   if (command === 'save') saveCurrent(false);
   if (command === 'save-as') saveCurrent(true);
